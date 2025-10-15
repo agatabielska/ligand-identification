@@ -1,0 +1,2 @@
+- do pomocy (oglądanie struktury białek)  https://www.rcsb.org/
+- Do wizualizacji za białek: https://moorhen.org/, coot/wincoot, chimerax
