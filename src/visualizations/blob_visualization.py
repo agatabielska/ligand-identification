@@ -2,6 +2,12 @@ import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
 from typing import Callable, Dict
+import sys
+from pathlib import Path
+
+# Ensure src is in sys.path for imports
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+from utils.sampling_strategies import RandomSelectionTransform, UniformSelectionTransform
 
 # ============================================================================
 # SAMPLING FUNCTIONS - Add your custom sampling functions here
@@ -11,41 +17,13 @@ def no_sampling(data: np.ndarray) -> np.ndarray:
     """Return all non-zero probability points"""
     return data
 
-def top_k_sampling(data: np.ndarray, k: int = 100) -> np.ndarray:
-    """Keep only top k highest probability values"""
-    flat_data = data.flatten()
-    if k >= len(flat_data[flat_data > 0]):
-        return data
-    
-    threshold = np.partition(flat_data[flat_data > 0], -k)[-k]
-    result = data.copy()
-    result[result < threshold] = 0
-    return result
+def random_sampling(data: np.ndarray, ratio: float) -> np.ndarray:
+    transform = RandomSelectionTransform(max_blob_size=int(np.count_nonzero(data) * ratio))
+    return transform.preprocess(data)
 
-def threshold_sampling(data: np.ndarray, threshold: float = 0.5) -> np.ndarray:
-    """Keep only values above threshold"""
-    result = data.copy()
-    result[result < threshold] = 0
-    return result
-
-def random_sampling(data: np.ndarray, ratio: float = 0.3) -> np.ndarray:
-    """Randomly keep a ratio of non-zero points"""
-    result = data.copy()
-    non_zero_mask = result > 0
-    non_zero_indices = np.argwhere(non_zero_mask)
-    
-    if len(non_zero_indices) == 0:
-        return result
-    
-    n_keep = int(len(non_zero_indices) * ratio)
-    keep_indices = np.random.choice(len(non_zero_indices), n_keep, replace=False)
-    
-    mask = np.zeros_like(result, dtype=bool)
-    for idx in keep_indices:
-        mask[tuple(non_zero_indices[idx])] = True
-    
-    result[~mask] = 0
-    return result
+def uniform_sampling(data: np.ndarray, ratio: float, method: str) -> np.ndarray:
+    transform = UniformSelectionTransform(max_blob_size=int(np.count_nonzero(data) * ratio), method=method)
+    return transform.preprocess(data)
 
 # ============================================================================
 # SAMPLING FUNCTIONS REGISTRY
@@ -53,13 +31,18 @@ def random_sampling(data: np.ndarray, ratio: float = 0.3) -> np.ndarray:
 
 SAMPLING_FUNCTIONS: Dict[str, Callable] = {
     "No Sampling": no_sampling,
-    "Top K (k=100)": lambda data: top_k_sampling(data, k=100),
-    "Top K (k=500)": lambda data: top_k_sampling(data, k=500),
-    "Threshold (0.3)": lambda data: threshold_sampling(data, threshold=0.3),
-    "Threshold (0.5)": lambda data: threshold_sampling(data, threshold=0.5),
-    "Threshold (0.7)": lambda data: threshold_sampling(data, threshold=0.7),
+    "Random 10%": lambda data: random_sampling(data, ratio=0.1),
     "Random 30%": lambda data: random_sampling(data, ratio=0.3),
     "Random 50%": lambda data: random_sampling(data, ratio=0.5),
+    "Uniform 10% max": lambda data: uniform_sampling(data, ratio=0.1, method='max'),
+    "Uniform 30% max": lambda data: uniform_sampling(data, ratio=0.3, method='max'),
+    "Uniform 50% max": lambda data: uniform_sampling(data, ratio=0.5, method='max'),
+    "Uniform 10% average": lambda data: uniform_sampling(data, ratio=0.1, method='average'),
+    "Uniform 30% average": lambda data: uniform_sampling(data, ratio=0.3, method='average'),
+    "Uniform 50% average": lambda data: uniform_sampling(data, ratio=0.5, method='average'),
+    "Uniform 10% basic": lambda data: uniform_sampling(data, ratio=0.1, method='basic'),
+    "Uniform 30% basic": lambda data: uniform_sampling(data, ratio=0.3, method='basic'),
+    "Uniform 50% basic": lambda data: uniform_sampling(data, ratio=0.5, method='basic'),
 }
 
 # ============================================================================
