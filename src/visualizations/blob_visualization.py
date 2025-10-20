@@ -25,8 +25,8 @@ def uniform_sampling(data: np.ndarray, ratio: float, method: str) -> np.ndarray:
     transform = UniformSelectionTransform(max_blob_size=int(np.count_nonzero(data) * ratio), method=method)
     return transform.preprocess(data)
 
-def probabilistic_sampling(data: np.ndarray, ratio: float) -> np.ndarray:
-    transform = ProbabilisticSelectionTransform(max_blob_size=int(np.count_nonzero(data) * ratio))
+def probabilistic_sampling(data: np.ndarray, ratio: float, alpha: float) -> np.ndarray:
+    transform = ProbabilisticSelectionTransform(max_blob_size=int(np.count_nonzero(data) * ratio), alpha=alpha)
     return transform.preprocess(data)
 
 # ============================================================================
@@ -38,18 +38,24 @@ SAMPLING_FUNCTIONS: Dict[str, Callable] = {
     "Random 10%": lambda data: random_sampling(data, ratio=0.1),
     "Random 30%": lambda data: random_sampling(data, ratio=0.3),
     "Random 50%": lambda data: random_sampling(data, ratio=0.5),
-    "Uniform 10% max": lambda data: uniform_sampling(data, ratio=0.1, method='max'),
-    "Uniform 30% max": lambda data: uniform_sampling(data, ratio=0.3, method='max'),
-    "Uniform 50% max": lambda data: uniform_sampling(data, ratio=0.5, method='max'),
-    "Uniform 10% average": lambda data: uniform_sampling(data, ratio=0.1, method='average'),
-    "Uniform 30% average": lambda data: uniform_sampling(data, ratio=0.3, method='average'),
-    "Uniform 50% average": lambda data: uniform_sampling(data, ratio=0.5, method='average'),
-    "Uniform 10% basic": lambda data: uniform_sampling(data, ratio=0.1, method='basic'),
-    "Uniform 30% basic": lambda data: uniform_sampling(data, ratio=0.3, method='basic'),
-    "Uniform 50% basic": lambda data: uniform_sampling(data, ratio=0.5, method='basic'),
-    "Probabilistic 10%": lambda data: probabilistic_sampling(data, ratio=0.1),
-    "Probabilistic 30%": lambda data: probabilistic_sampling(data, ratio=0.3),
-    "Probabilistic 50%": lambda data: probabilistic_sampling(data, ratio=0.5),
+    "Uniform 10%, max": lambda data: uniform_sampling(data, ratio=0.1, method='max'),
+    "Uniform 30%, max": lambda data: uniform_sampling(data, ratio=0.3, method='max'),
+    "Uniform 50%, max": lambda data: uniform_sampling(data, ratio=0.5, method='max'),
+    "Uniform 10%, average": lambda data: uniform_sampling(data, ratio=0.1, method='average'),
+    "Uniform 30%, average": lambda data: uniform_sampling(data, ratio=0.3, method='average'),
+    "Uniform 50%, average": lambda data: uniform_sampling(data, ratio=0.5, method='average'),
+    "Uniform 10%, basic": lambda data: uniform_sampling(data, ratio=0.1, method='basic'),
+    "Uniform 30%, basic": lambda data: uniform_sampling(data, ratio=0.3, method='basic'),
+    "Uniform 50%, basic": lambda data: uniform_sampling(data, ratio=0.5, method='basic'),
+    "Probabilistic 10%, alpha=1.0": lambda data: probabilistic_sampling(data, ratio=0.1, alpha=1.0),
+    "Probabilistic 30%, alpha=1.0": lambda data: probabilistic_sampling(data, ratio=0.3, alpha=1.0),
+    "Probabilistic 50%, alpha=1.0": lambda data: probabilistic_sampling(data, ratio=0.5, alpha=1.0),
+    "Probabilistic 10%, alpha=2.0": lambda data: probabilistic_sampling(data, ratio=0.1, alpha=2.0),
+    "Probabilistic 30%, alpha=2.0": lambda data: probabilistic_sampling(data, ratio=0.3, alpha=2.0),
+    "Probabilistic 50%, alpha=2.0": lambda data: probabilistic_sampling(data, ratio=0.5, alpha=2.0),
+    "Probabilistic 10%, alpha=3.0": lambda data: probabilistic_sampling(data, ratio=0.1, alpha=3.0),
+    "Probabilistic 30%, alpha=3.0": lambda data: probabilistic_sampling(data, ratio=0.3, alpha=3.0),
+    "Probabilistic 50%, alpha=3.0": lambda data: probabilistic_sampling(data, ratio=0.5, alpha=3.0),
 }
 
 # ============================================================================

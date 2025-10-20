@@ -128,9 +128,11 @@ class ProbabilisticSelectionTransform(Transform):
     """
     A class that limits the number of voxels in the blob by selecting points based on their probabilities.
     Voxels with higher probabilities have a higher chance of being selected.
+    Probabilities are adjusted using a alpha parameter to control the sharpness of the distribution.
     """
-    def __init__(self, max_blob_size: int):
+    def __init__(self, max_blob_size: int, alpha: float = 1.0):
         self.max_blob_size = max_blob_size
+        self.alpha = alpha
 
     def preprocess(self, blob: np.ndarray) -> np.ndarray:
         non_zeros = blob.nonzero()
@@ -138,6 +140,7 @@ class ProbabilisticSelectionTransform(Transform):
             return blob
 
         probabilities = blob[non_zeros]
+        probabilities = np.power(probabilities, self.alpha)
         probabilities /= probabilities.sum()
 
         indices_mask = np.array(range(non_zeros[0].shape[0]))
