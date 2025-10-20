@@ -1,6 +1,5 @@
 # Adapted from https://github.com/jkarolczak/ligand-classification/blob/8ca4ffd678382d8084c0a162333692b74c985471/src/pipeline/transforms.py#L146
 from abc import ABC, abstractmethod
-from typing import Dict, Union, Callable
 import numpy as np
 import itertools
 import math
@@ -49,12 +48,7 @@ class UniformSelectionTransform(Transform):
     """
     A class that limits the number of voxels in the blob by selecting one point for each cell in a 3D grid.
     The value of that point depends on the chosen method.
-
-    :param config: configuration dictionary with integer 'max_blob_size' (maximal number of remaining voxels)
-     and string 'method' (dictating the method of assigning values to sampled voxels - options: 'basic'/'average'/'max')
     """
-
-
     def __init__(self, max_blob_size: int, method: str = 'max') -> None:
         methods = {
             'basic': UniformSelectionTransform._basic_selection,
@@ -128,3 +122,36 @@ class UniformSelectionTransform(Transform):
             processed_blob = self._selection(blob, scale)
             scale += 1
         return processed_blob
+
+
+class ProbabilisticSelectionTransform(Transform):
+    """
+    A class that limits the number of voxels in the blob by selecting points based on their probabilities.
+    Voxels with higher probabilities have a higher chance of being selected.
+    """
+    def __init__(self, max_blob_size: int):
+        self.max_blob_size = max_blob_size
+
+    def preprocess(self, blob: np.ndarray) -> np.ndarray:
+        non_zeros = blob.nonzero()
+        if non_zeros[0].shape[0] <= self.max_blob_size:
+            return blob
+
+        probabilities = blob[non_zeros]
+        probabilities /= probabilities.sum()
+
+        indices_mask = np.array(range(non_zeros[0].shape[0]))
+        indices_mask = np.random.choice(
+            indices_mask,
+            size=self.max_blob_size,
+            replace=False,
+            p=probabilities
+        )
+        x = non_zeros[0][indices_mask]
+        y = non_zeros[1][indices_mask]
+        z = non_zeros[2][indices_mask]
+
+        mask = np.zeros_like(blob)
+        mask[x, y, z] = 1.0
+
+        return blob * mask

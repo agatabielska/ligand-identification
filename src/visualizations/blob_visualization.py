@@ -7,7 +7,7 @@ from pathlib import Path
 
 # Ensure src is in sys.path for imports
 sys.path.append(str(Path(__file__).resolve().parent.parent))
-from utils.sampling_strategies import RandomSelectionTransform, UniformSelectionTransform
+from utils.sampling_strategies import RandomSelectionTransform, UniformSelectionTransform, ProbabilisticSelectionTransform
 
 # ============================================================================
 # SAMPLING FUNCTIONS - Add your custom sampling functions here
@@ -23,6 +23,10 @@ def random_sampling(data: np.ndarray, ratio: float) -> np.ndarray:
 
 def uniform_sampling(data: np.ndarray, ratio: float, method: str) -> np.ndarray:
     transform = UniformSelectionTransform(max_blob_size=int(np.count_nonzero(data) * ratio), method=method)
+    return transform.preprocess(data)
+
+def probabilistic_sampling(data: np.ndarray, ratio: float) -> np.ndarray:
+    transform = ProbabilisticSelectionTransform(max_blob_size=int(np.count_nonzero(data) * ratio))
     return transform.preprocess(data)
 
 # ============================================================================
@@ -43,6 +47,9 @@ SAMPLING_FUNCTIONS: Dict[str, Callable] = {
     "Uniform 10% basic": lambda data: uniform_sampling(data, ratio=0.1, method='basic'),
     "Uniform 30% basic": lambda data: uniform_sampling(data, ratio=0.3, method='basic'),
     "Uniform 50% basic": lambda data: uniform_sampling(data, ratio=0.5, method='basic'),
+    "Probabilistic 10%": lambda data: probabilistic_sampling(data, ratio=0.1),
+    "Probabilistic 30%": lambda data: probabilistic_sampling(data, ratio=0.3),
+    "Probabilistic 50%": lambda data: probabilistic_sampling(data, ratio=0.5),
 }
 
 # ============================================================================
