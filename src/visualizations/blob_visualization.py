@@ -129,10 +129,10 @@ if uploaded_file is not None:
         # Load NPZ file
         data = np.load(uploaded_file)
         
-        if 'blob' not in data:
-            st.error("NPZ file must contain 'blob' entry")
+        if 'arr_0' not in data:
+            st.error("NPZ file must contain 'arr_0' entry")
         else:
-            blob = data['blob']
+            blob = data['arr_0']
             
             # Validate data
             if blob.ndim != 3:
