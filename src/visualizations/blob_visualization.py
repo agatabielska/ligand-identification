@@ -125,10 +125,13 @@ if uploaded_file is not None:
         # Load NPZ file
         data = np.load(uploaded_file)
         
-        if 'arr_0' not in data:
-            st.error("NPZ file must contain 'arr_0' entry")
+        # Check what keys are present in the NPZ file
+        keys = list(data.keys())
+        
+        if len(keys) != 1:
+            st.error("NPZ file must contain exactly one entry, but found: " + ", ".join(keys))
         else:
-            blob = data['arr_0']
+            blob = data[keys[0]]
             
             # Validate data
             if blob.ndim != 3:
