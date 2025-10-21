@@ -1,4 +1,5 @@
 # Adapted from https://github.com/jkarolczak/ligand-classification/blob/8ca4ffd678382d8084c0a162333692b74c985471/src/pipeline/transforms.py#L146
+from numpy.lib.stride_tricks import sliding_window_view
 from abc import ABC, abstractmethod
 import numpy as np
 import itertools
@@ -158,3 +159,28 @@ class ProbabilisticSelectionTransform(Transform):
         mask[x, y, z] = 1.0
 
         return blob * mask
+
+
+class SpacialNormalization(Transform):
+    """
+    Normalizes the blob based on local min and max values within a square_size x square_size x square_size cube around each voxel.
+    This process is repeated for a specified number of iterations to enhance local contrast.
+    """
+    def __init__(self, iterations: int = 1, square_size: int = 3):
+        if square_size % 2 == 0:
+            raise ValueError("square_size must be an odd number.")
+        self.iterations = iterations
+        self.square_size = square_size
+
+    def preprocess(self, blob: np.ndarray) -> np.ndarray:
+        for _ in range(self.iterations):
+            padded_blob = np.pad(blob, pad_width=self.square_size // 2, mode='edge')
+            windows = sliding_window_view(padded_blob, (self.square_size, self.square_size, self.square_size))
+
+            # Compute min and max for each 3x3x3 cube
+            mins = windows.min(axis=(-3, -2, -1))
+            maxs = windows.max(axis=(-3, -2, -1))
+
+            blob = (blob - mins) / (maxs - mins + 1e-9)
+
+        return blob

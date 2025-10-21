@@ -7,7 +7,7 @@ from pathlib import Path
 
 # Ensure src is in sys.path for imports
 sys.path.append(str(Path(__file__).resolve().parent.parent))
-from utils.sampling_strategies import RandomSelectionTransform, UniformSelectionTransform, ProbabilisticSelectionTransform
+from utils.sampling_strategies import RandomSelectionTransform, UniformSelectionTransform, ProbabilisticSelectionTransform, SpacialNormalization
 
 # ============================================================================
 # SAMPLING FUNCTIONS - Add your custom sampling functions here
@@ -27,6 +27,10 @@ def uniform_sampling(data: np.ndarray, ratio: float, method: str) -> np.ndarray:
 
 def probabilistic_sampling(data: np.ndarray, ratio: float, alpha: float) -> np.ndarray:
     transform = ProbabilisticSelectionTransform(max_blob_size=int(np.count_nonzero(data) * ratio), alpha=alpha)
+    return transform.preprocess(data)
+
+def spacial_normalization(data: np.ndarray, iterations: int, square_size: int) -> np.ndarray:
+    transform = SpacialNormalization(iterations=iterations, square_size=square_size)
     return transform.preprocess(data)
 
 # ============================================================================
@@ -56,6 +60,15 @@ SAMPLING_FUNCTIONS: Dict[str, Callable] = {
     "Probabilistic 10%, alpha=3.0": lambda data: probabilistic_sampling(data, ratio=0.1, alpha=3.0),
     "Probabilistic 30%, alpha=3.0": lambda data: probabilistic_sampling(data, ratio=0.3, alpha=3.0),
     "Probabilistic 50%, alpha=3.0": lambda data: probabilistic_sampling(data, ratio=0.5, alpha=3.0),
+    "Spacial Normalization, 1 iteration, 3x3x3": lambda data: spacial_normalization(data, iterations=1, square_size=3),
+    "Spacial Normalization, 2 iterations, 3x3x3": lambda data: spacial_normalization(data, iterations=2, square_size=3),
+    "Spacial Normalization, 3 iterations, 3x3x3": lambda data: spacial_normalization(data, iterations=3, square_size=3),
+    "Spacial Normalization, 1 iteration, 5x5x5": lambda data: spacial_normalization(data, iterations=1, square_size=5),
+    "Spacial Normalization, 2 iterations, 5x5x5": lambda data: spacial_normalization(data, iterations=2, square_size=5),
+    "Spacial Normalization, 3 iterations, 5x5x5": lambda data: spacial_normalization(data, iterations=3, square_size=5),
+    "Spacial Normalization, 1 iteration, 7x7x7": lambda data: spacial_normalization(data, iterations=1, square_size=7),
+    "Spacial Normalization, 2 iterations, 7x7x7": lambda data: spacial_normalization(data, iterations=2, square_size=7),
+    "Spacial Normalization, 3 iterations, 7x7x7": lambda data: spacial_normalization(data, iterations=3, square_size=7),
 }
 
 # ============================================================================
