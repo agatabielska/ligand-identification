@@ -1,75 +1,85 @@
 import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
-from typing import Callable, Dict
 import sys
 from pathlib import Path
+import inspect
+from typing import Any, List
 
 # Ensure src is in sys.path for imports
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 from utils.sampling_strategies import RandomSelectionTransform, UniformSelectionTransform, ProbabilisticSelectionTransform, SpacialNormalization
 
-# ============================================================================
-# SAMPLING FUNCTIONS - Add your custom sampling functions here
-# ============================================================================
-
-def no_sampling(data: np.ndarray) -> np.ndarray:
-    """Return all non-zero probability points"""
-    return data
-
-def random_sampling(data: np.ndarray, ratio: float) -> np.ndarray:
-    transform = RandomSelectionTransform(max_blob_size=int(np.count_nonzero(data) * ratio))
-    return transform.preprocess(data)
-
-def uniform_sampling(data: np.ndarray, ratio: float, method: str) -> np.ndarray:
-    transform = UniformSelectionTransform(max_blob_size=int(np.count_nonzero(data) * ratio), method=method)
-    return transform.preprocess(data)
-
-def probabilistic_sampling(data: np.ndarray, ratio: float, alpha: float) -> np.ndarray:
-    transform = ProbabilisticSelectionTransform(max_blob_size=int(np.count_nonzero(data) * ratio), alpha=alpha)
-    return transform.preprocess(data)
-
-def spacial_normalization(data: np.ndarray, iterations: int, square_size: int) -> np.ndarray:
-    transform = SpacialNormalization(iterations=iterations, square_size=square_size)
-    return transform.preprocess(data)
-
-# ============================================================================
-# SAMPLING FUNCTIONS REGISTRY
-# ============================================================================
-
-SAMPLING_FUNCTIONS: Dict[str, Callable] = {
-    "No Sampling": no_sampling,
-    "Random 10%": lambda data: random_sampling(data, ratio=0.1),
-    "Random 30%": lambda data: random_sampling(data, ratio=0.3),
-    "Random 50%": lambda data: random_sampling(data, ratio=0.5),
-    "Uniform 10%, max": lambda data: uniform_sampling(data, ratio=0.1, method='max'),
-    "Uniform 30%, max": lambda data: uniform_sampling(data, ratio=0.3, method='max'),
-    "Uniform 50%, max": lambda data: uniform_sampling(data, ratio=0.5, method='max'),
-    "Uniform 10%, average": lambda data: uniform_sampling(data, ratio=0.1, method='average'),
-    "Uniform 30%, average": lambda data: uniform_sampling(data, ratio=0.3, method='average'),
-    "Uniform 50%, average": lambda data: uniform_sampling(data, ratio=0.5, method='average'),
-    "Uniform 10%, basic": lambda data: uniform_sampling(data, ratio=0.1, method='basic'),
-    "Uniform 30%, basic": lambda data: uniform_sampling(data, ratio=0.3, method='basic'),
-    "Uniform 50%, basic": lambda data: uniform_sampling(data, ratio=0.5, method='basic'),
-    "Probabilistic 10%, alpha=1.0": lambda data: probabilistic_sampling(data, ratio=0.1, alpha=1.0),
-    "Probabilistic 30%, alpha=1.0": lambda data: probabilistic_sampling(data, ratio=0.3, alpha=1.0),
-    "Probabilistic 50%, alpha=1.0": lambda data: probabilistic_sampling(data, ratio=0.5, alpha=1.0),
-    "Probabilistic 10%, alpha=2.0": lambda data: probabilistic_sampling(data, ratio=0.1, alpha=2.0),
-    "Probabilistic 30%, alpha=2.0": lambda data: probabilistic_sampling(data, ratio=0.3, alpha=2.0),
-    "Probabilistic 50%, alpha=2.0": lambda data: probabilistic_sampling(data, ratio=0.5, alpha=2.0),
-    "Probabilistic 10%, alpha=3.0": lambda data: probabilistic_sampling(data, ratio=0.1, alpha=3.0),
-    "Probabilistic 30%, alpha=3.0": lambda data: probabilistic_sampling(data, ratio=0.3, alpha=3.0),
-    "Probabilistic 50%, alpha=3.0": lambda data: probabilistic_sampling(data, ratio=0.5, alpha=3.0),
-    "Spacial Normalization, 1 iteration, 3x3x3": lambda data: spacial_normalization(data, iterations=1, square_size=3),
-    "Spacial Normalization, 2 iterations, 3x3x3": lambda data: spacial_normalization(data, iterations=2, square_size=3),
-    "Spacial Normalization, 3 iterations, 3x3x3": lambda data: spacial_normalization(data, iterations=3, square_size=3),
-    "Spacial Normalization, 1 iteration, 5x5x5": lambda data: spacial_normalization(data, iterations=1, square_size=5),
-    "Spacial Normalization, 2 iterations, 5x5x5": lambda data: spacial_normalization(data, iterations=2, square_size=5),
-    "Spacial Normalization, 3 iterations, 5x5x5": lambda data: spacial_normalization(data, iterations=3, square_size=5),
-    "Spacial Normalization, 1 iteration, 7x7x7": lambda data: spacial_normalization(data, iterations=1, square_size=7),
-    "Spacial Normalization, 2 iterations, 7x7x7": lambda data: spacial_normalization(data, iterations=2, square_size=7),
-    "Spacial Normalization, 3 iterations, 7x7x7": lambda data: spacial_normalization(data, iterations=3, square_size=7),
+# Registry of available Transform classes for the custom stack editor
+TRANSFORM_CLASSES = {
+    'RandomSelectionTransform': RandomSelectionTransform,
+    'UniformSelectionTransform': UniformSelectionTransform,
+    'ProbabilisticSelectionTransform': ProbabilisticSelectionTransform,
+    'SpacialNormalization': SpacialNormalization,
 }
+
+
+def parse_input_value(value: str, expected_type: Any = None):
+    """Try to coerce a string input into int/float/str based on expectation or content."""
+    if expected_type in (int, float, str):
+        try:
+            if expected_type is int:
+                return int(value)
+            if expected_type is float:
+                return float(value)
+            return value
+        except Exception:
+            return value
+
+    # Heuristic parsing
+    try:
+        return int(value)
+    except Exception:
+        pass
+    try:
+        return float(value)
+    except Exception:
+        pass
+    return value
+
+
+def instantiate_and_apply_stack(data: np.ndarray, stack: List[dict]) -> np.ndarray:
+    """Given a stack (list of dict with 'class' and 'kwargs'), instantiate each Transform and apply sequentially.
+
+    Each item in stack: {'class': 'ClassName', 'kwargs': {'param': value, ...}}
+    """
+    out = data
+
+    def kwargs_complete(kwargs: dict) -> bool:
+        # Consider kwargs incomplete if any value is an empty string or None.
+        for v in kwargs.values():
+            if v is None:
+                return False
+            if isinstance(v, str) and v.strip() == '':
+                return False
+        return True
+
+    for item in stack:
+        cls_name = item.get('class')
+        kwargs = item.get('kwargs', {}) or {}
+        cls = TRANSFORM_CLASSES.get(cls_name)
+        if cls is None:
+            # unknown transform: skip
+            continue
+
+        # Skip transforms with incomplete kwargs (e.g., placeholders like '')
+        if not kwargs_complete(kwargs):
+            continue
+
+        try:
+            inst = cls(**kwargs)
+            if hasattr(inst, 'preprocess'):
+                out = inst.preprocess(out)
+        except Exception as e:
+            # If instantiation fails, skip the transform but continue pipeline
+            print(f"Failed to instantiate {cls_name} with {kwargs}: {e}")
+            continue
+    return out
 
 # ============================================================================
 # VISUALIZATION FUNCTIONS
@@ -157,33 +167,93 @@ if uploaded_file is not None:
             st.info(f"Non-zero values: {np.count_nonzero(blob)} / {blob.size} ({np.count_nonzero(blob)/blob.size*100:.2f}%)")
             st.info(f"Value range: [{blob.min():.4f}, {blob.max():.4f}]")
             
-            # Create three columns for plots
-            cols = st.columns(3)
-            
-            # Store sampling choices in session state
-            if 'sampling_choices' not in st.session_state:
-                st.session_state.sampling_choices = ["No Sampling"] * 3
-            
-            # Create selectboxes and plots for each column
-            for i, col in enumerate(cols):
-                with col:
-                    st.session_state.sampling_choices[i] = st.selectbox(
-                        f"Sampling Function (Plot {i+1})",
-                        options=list(SAMPLING_FUNCTIONS.keys()),
-                        key=f"sampling_{i}",
-                        index=list(SAMPLING_FUNCTIONS.keys()).index(st.session_state.sampling_choices[i])
-                    )
-                    
-                    # Apply sampling function
-                    sampling_func = SAMPLING_FUNCTIONS[st.session_state.sampling_choices[i]]
-                    sampled_data = sampling_func(blob.copy())
-                    
+            # Store transform stacks in session state (three stacks)
+            if 'transform_stacks' not in st.session_state:
+                st.session_state.transform_stacks = [[] for _ in range(3)]
+
+            # Helper to render a stack editor for a plot
+            def render_stack_editor(plot_idx: int):
+                stack = st.session_state.transform_stacks[plot_idx]
+
+                st.markdown("**Available transforms:**")
+                cols_small = st.columns([3, 1])
+                with cols_small[0]:
+                    to_add = st.selectbox(f"Transform to add (Stack {plot_idx+1})", options=list(TRANSFORM_CLASSES.keys()), key=f"add_select_{plot_idx}")
+                with cols_small[1]:
+                    if st.button("Add", key=f"add_btn_{plot_idx}"):
+                        # append with kwargs from constructor defaults when available
+                        cls = TRANSFORM_CLASSES[to_add]
+                        sig = inspect.signature(cls.__init__)
+                        kwargs = {}
+                        for name, param in sig.parameters.items():
+                            if name == 'self':
+                                continue
+                            if param.default is not inspect._empty:
+                                kwargs[name] = param.default
+                            else:
+                                kwargs[name] = ''
+                        stack.append({'class': to_add, 'kwargs': kwargs})
+                        st.session_state.transform_stacks[plot_idx] = stack
+
+                # Render existing stack items
+                for idx, item in enumerate(list(stack)):
+                    cls_name = item.get('class')
+                    kwargs = item.get('kwargs', {}) or {}
+                    with st.expander(f"{idx+1}. {cls_name}", expanded=False):
+                        # Show remove button
+                        if st.button("Remove", key=f"remove_{plot_idx}_{idx}"):
+                            stack.pop(idx)
+                            st.session_state.transform_stacks[plot_idx] = stack
+                            # Some Streamlit installations don't expose experimental_rerun.
+                            # Guard the call so we don't raise AttributeError.
+                            if hasattr(st, "experimental_rerun") and callable(getattr(st, "experimental_rerun")):
+                                st.experimental_rerun()
+                            # If experimental_rerun isn't available, updating session_state is
+                            # usually sufficient to trigger a rerun on next interaction.
+                            # Avoid continuing to process this expander after mutating `stack`
+                            # which would cause IndexError when accessing stack[idx].
+                            return
+                        
+                        # show inputs for kwargs
+                        for param_name, param_val in kwargs.items():
+                            widget_key = f"plot{plot_idx}_item{idx}_{param_name}"
+                            val = st.text_input(f"{param_name}", value=str(param_val), key=widget_key)
+                            cls = TRANSFORM_CLASSES.get(cls_name)
+                            expected = None
+                            if cls is not None:
+                                sig = inspect.signature(cls.__init__)
+                                p = sig.parameters.get(param_name)
+                                if p is not None and p.annotation in (int, float, str):
+                                    expected = p.annotation
+                            parsed = parse_input_value(val, expected)
+                            kwargs[param_name] = parsed
+
+                        stack[idx]['kwargs'] = kwargs
+
+                st.session_state.transform_stacks[plot_idx] = stack
+
+            # Render stack editors above the plots so plots are always aligned
+            st.markdown("## Transform stacks")
+            editor_cols = st.columns(3)
+            for i, ecol in enumerate(editor_cols):
+                with ecol:
+                    st.subheader(f"Stack {i+1}")
+                    render_stack_editor(i)
+
+            # Now render the three plots in aligned columns (editors are above)
+            plot_cols = st.columns(3)
+            for i, pcol in enumerate(plot_cols):
+                with pcol:
+                    stack = st.session_state.transform_stacks[i]
+                    sampled_data = instantiate_and_apply_stack(blob.copy(), stack)
+                    title = f"Plot {i+1}: {len(stack)} transforms"
+
                     # Show stats
                     n_points = np.count_nonzero(sampled_data)
                     st.caption(f"Points displayed: {n_points}")
-                    
+
                     # Create and display plot with fixed scale
-                    fig = create_3d_scatter(sampled_data, f"Plot {i+1}: {st.session_state.sampling_choices[i]}", blob.shape)
+                    fig = create_3d_scatter(sampled_data, title, blob.shape)
                     st.plotly_chart(fig, use_container_width=True)
             
     except Exception as e:
@@ -195,14 +265,14 @@ else:
     # Show instructions
     with st.expander("ℹ️ Instructions"):
         st.markdown("""
-        ### How to use:
-        1. Upload an NPZ file containing a 'blob' entry with 3D probability data
-        2. The data should be a 3D numpy array of float64 probabilities (values between 0 and 1)
-        3. Three interactive 3D plots will be displayed side by side
-        4. Choose a sampling function for each plot from the dropdown menu
-        5. Only sampled (non-zero) data points will be visualized
+    ### How to use:
+    1. Upload an NPZ file containing a 'blob' entry with 3D probability data
+    2. The data should be a 3D numpy array of float64 probabilities (values between 0 and 1)
+    3. Three interactive 3D plots will be displayed side by side
+    4. Edit the transform stacks in the "Transform stacks" section above the plots.
+    5. For each stack you can add transforms, remove them, and edit their kwargs. The plots below will apply the stacks in order.
         
-        ### Adding custom sampling functions:
-        Edit the `SAMPLING_FUNCTIONS` dictionary in the source code to add your own sampling functions.
-        Each function should take a 3D numpy array and return a filtered 3D numpy array.
+    ### Notes on kwargs:
+    - All kwargs are edited as text inputs and will be parsed into int/float when possible.
+    - If a transform constructor provides default values they will be used when adding a transform.
         """)
