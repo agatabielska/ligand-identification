@@ -125,15 +125,30 @@ class UniformSelectionTransform(Transform):
         return processed_blob
 
 
+class PowerTransform(Transform):
+    """
+    A class that applies a power transformation to the blob.
+    Each voxel value is raised to the specified power.
+    """
+    def __init__(self, power: float):
+        self.power = power
+
+    def preprocess(self, blob: np.ndarray) -> np.ndarray:
+        blob = np.clip(blob, a_min=0, a_max=None)
+        non_zero = blob.nonzero()
+        blob[non_zero] = np.power(blob[non_zero], self.power)
+        blob[non_zero] = (blob[non_zero] - np.min(blob[non_zero])) / (np.max(blob[non_zero]) - np.min(blob[non_zero]) + 1e-9)
+        return blob
+
+
 class ProbabilisticSelectionTransform(Transform):
     """
     A class that limits the number of voxels in the blob by selecting points based on their probabilities.
     Voxels with higher probabilities have a higher chance of being selected.
     Probabilities are adjusted using a alpha parameter to control the sharpness of the distribution.
     """
-    def __init__(self, max_blob_size: int, alpha: float = 1.0):
+    def __init__(self, max_blob_size: int):
         self.max_blob_size = max_blob_size
-        self.alpha = alpha
 
     def preprocess(self, blob: np.ndarray) -> np.ndarray:
         non_zeros = blob.nonzero()
@@ -141,7 +156,6 @@ class ProbabilisticSelectionTransform(Transform):
             return blob
 
         probabilities = blob[non_zeros]
-        probabilities = np.power(probabilities, self.alpha)
         probabilities /= probabilities.sum()
 
         indices_mask = np.array(range(non_zeros[0].shape[0]))

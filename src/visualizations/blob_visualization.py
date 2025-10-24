@@ -8,7 +8,13 @@ from typing import Any, List
 
 # Ensure src is in sys.path for imports
 sys.path.append(str(Path(__file__).resolve().parent.parent))
-from utils.sampling_strategies import RandomSelectionTransform, UniformSelectionTransform, ProbabilisticSelectionTransform, SpacialNormalization
+from utils.sampling_strategies import (
+    RandomSelectionTransform, 
+    UniformSelectionTransform, 
+    ProbabilisticSelectionTransform, 
+    SpacialNormalization,
+    PowerTransform
+)
 
 # Registry of available Transform classes for the custom stack editor
 TRANSFORM_CLASSES = {
@@ -16,6 +22,7 @@ TRANSFORM_CLASSES = {
     'UniformSelectionTransform': UniformSelectionTransform,
     'ProbabilisticSelectionTransform': ProbabilisticSelectionTransform,
     'SpacialNormalization': SpacialNormalization,
+    "PowerTransform": PowerTransform
 }
 
 
@@ -90,6 +97,8 @@ def create_3d_scatter(data: np.ndarray, title: str, data_shape: tuple) -> go.Fig
     # Get non-zero probability coordinates
     x, y, z = np.where(data > 0)
     probabilities = data[x, y, z]
+
+    probabilities = (probabilities - np.min(probabilities)) / (np.max(probabilities) - np.min(probabilities) + 1e-9)
     
     # Create scatter plot (even if empty)
     fig = go.Figure(data=[go.Scatter3d(
