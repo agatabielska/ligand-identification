@@ -14,6 +14,7 @@ from utils.sampling_strategies import (
     ProbabilisticSelectionTransform,
     SpacialNormalization,
     PowerTransform,
+    TemperatureScaling,
 )
 
 # Registry of available Transform classes for the custom stack editor
@@ -23,6 +24,7 @@ TRANSFORM_CLASSES = {
     "ProbabilisticSelectionTransform": ProbabilisticSelectionTransform,
     "SpacialNormalization": SpacialNormalization,
     "PowerTransform": PowerTransform,
+    "TemperatureScaling": TemperatureScaling,
 }
 
 
