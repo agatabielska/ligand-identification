@@ -9,20 +9,20 @@ from typing import Any, List
 # Ensure src is in sys.path for imports
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 from utils.sampling_strategies import (
-    RandomSelectionTransform, 
-    UniformSelectionTransform, 
-    ProbabilisticSelectionTransform, 
+    RandomSelectionTransform,
+    UniformSelectionTransform,
+    ProbabilisticSelectionTransform,
     SpacialNormalization,
-    PowerTransform
+    PowerTransform,
 )
 
 # Registry of available Transform classes for the custom stack editor
 TRANSFORM_CLASSES = {
-    'RandomSelectionTransform': RandomSelectionTransform,
-    'UniformSelectionTransform': UniformSelectionTransform,
-    'ProbabilisticSelectionTransform': ProbabilisticSelectionTransform,
-    'SpacialNormalization': SpacialNormalization,
-    "PowerTransform": PowerTransform
+    "RandomSelectionTransform": RandomSelectionTransform,
+    "UniformSelectionTransform": UniformSelectionTransform,
+    "ProbabilisticSelectionTransform": ProbabilisticSelectionTransform,
+    "SpacialNormalization": SpacialNormalization,
+    "PowerTransform": PowerTransform,
 }
 
 
@@ -62,13 +62,13 @@ def instantiate_and_apply_stack(data: np.ndarray, stack: List[dict]) -> np.ndarr
         for v in kwargs.values():
             if v is None:
                 return False
-            if isinstance(v, str) and v.strip() == '':
+            if isinstance(v, str) and v.strip() == "":
                 return False
         return True
 
     for item in stack:
-        cls_name = item.get('class')
-        kwargs = item.get('kwargs', {}) or {}
+        cls_name = item.get("class")
+        kwargs = item.get("kwargs", {}) or {}
         cls = TRANSFORM_CLASSES.get(cls_name)
         if cls is None:
             # unknown transform: skip
@@ -80,7 +80,7 @@ def instantiate_and_apply_stack(data: np.ndarray, stack: List[dict]) -> np.ndarr
 
         try:
             inst = cls(**kwargs)
-            if hasattr(inst, 'preprocess'):
+            if hasattr(inst, "preprocess"):
                 out = inst.preprocess(out)
         except Exception as e:
             # If instantiation fails, skip the transform but continue pipeline
@@ -88,9 +88,11 @@ def instantiate_and_apply_stack(data: np.ndarray, stack: List[dict]) -> np.ndarr
             continue
     return out
 
+
 # ============================================================================
 # VISUALIZATION FUNCTIONS
 # ============================================================================
+
 
 def create_3d_scatter(data: np.ndarray, title: str, data_shape: tuple) -> go.Figure:
     """Create a 3D scatter plot from probability data with fixed axes"""
@@ -98,47 +100,103 @@ def create_3d_scatter(data: np.ndarray, title: str, data_shape: tuple) -> go.Fig
     x, y, z = np.where(data > 0)
     probabilities = data[x, y, z]
 
-    probabilities = (probabilities - np.min(probabilities)) / (np.max(probabilities) - np.min(probabilities) + 1e-9)
-    
+    probabilities = (probabilities - np.min(probabilities)) / (
+        np.max(probabilities) - np.min(probabilities) + 1e-9
+    )
+
     # Create scatter plot (even if empty)
-    fig = go.Figure(data=[go.Scatter3d(
-        x=x, y=y, z=z,
-        mode='markers',
-        marker=dict(
-            size=3,
-            color=probabilities if len(probabilities) > 0 else [],
-            colorscale='Viridis',
-            showscale=True,
-            colorbar=dict(title="Probability"),
-            cmin=0,
-            cmax=1
-        ),
-        text=[f'Prob: {p:.3f}' for p in probabilities],
-        hovertemplate='<b>Position</b><br>X: %{x}<br>Y: %{y}<br>Z: %{z}<br>%{text}<extra></extra>'
-    )])
-    
+    fig = go.Figure(
+        data=[
+            go.Scatter3d(
+                x=x,
+                y=y,
+                z=z,
+                mode="markers",
+                marker=dict(
+                    size=3,
+                    color=probabilities if len(probabilities) > 0 else [],
+                    colorscale="Viridis",
+                    showscale=True,
+                    colorbar=dict(title="Probability"),
+                    cmin=0,
+                    cmax=1,
+                ),
+                text=[f"Prob: {p:.3f}" for p in probabilities],
+                hovertemplate="<b>Position</b><br>X: %{x}<br>Y: %{y}<br>Z: %{z}<br>%{text}<extra></extra>",
+            )
+        ]
+    )
+
     if len(x) == 0:
         fig.add_annotation(
             text="No data to display",
-            xref="paper", yref="paper",
-            x=0.5, y=0.5, showarrow=False,
-            font=dict(size=14, color="gray")
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=14, color="gray"),
         )
-    
+
     # Fix axes to original data dimensions
     fig.update_layout(
         title=title,
         scene=dict(
-            xaxis=dict(title='X', range=[0, data_shape[0]-1]),
-            yaxis=dict(title='Y', range=[0, data_shape[1]-1]),
-            zaxis=dict(title='Z', range=[0, data_shape[2]-1]),
-            aspectmode='data'
+            xaxis=dict(title="X", range=[0, data_shape[0] - 1]),
+            yaxis=dict(title="Y", range=[0, data_shape[1] - 1]),
+            zaxis=dict(title="Z", range=[0, data_shape[2] - 1]),
+            aspectmode="data",
         ),
         height=500,
-        margin=dict(l=0, r=0, t=40, b=0)
+        margin=dict(l=0, r=0, t=40, b=0),
     )
-    
+
     return fig
+
+
+def create_intensity_histogram(
+    values: np.ndarray, title: str, nbins: int = 50
+) -> go.Figure:
+    """Create a 1D histogram figure for intensity/probability values.
+
+    Expects a 1D array of values in [0, 1] ideally (normalized upstream). If empty, shows a placeholder.
+    """
+    fig = go.Figure()
+
+    if values.size > 0:
+        fig.add_trace(
+            go.Histogram(
+                x=values,
+                nbinsx=nbins,
+                marker=dict(color="#3b82f6"),
+                opacity=0.85,
+                name="Intensity",
+            )
+        )
+        x_min, x_max = float(values.min()), float(values.max())
+    else:
+        # Add an empty trace so axes render consistently
+        fig.add_trace(go.Histogram(x=[]))
+        x_min, x_max = 0.0, 1.0
+
+    fig.update_layout(
+        title=title,
+        xaxis_title="Intensity",
+        yaxis_title="Count",
+        bargap=0.02,
+        height=250,
+        margin=dict(l=0, r=0, t=40, b=0),
+    )
+
+    # Keep x range tight to observed values but within [0,1] when reasonable
+    # This avoids super-wide axes if out-of-range values slip through
+    lo = max(0.0, x_min) if np.isfinite(x_min) else 0.0
+    hi = min(1.0, x_max) if np.isfinite(x_max) else 1.0
+    if lo < hi:
+        fig.update_xaxes(range=[lo, hi])
+
+    return fig
+
 
 # ============================================================================
 # STREAMLIT APP
@@ -150,34 +208,38 @@ st.title("3D Probability Data Visualizer")
 st.markdown("Upload an NPZ file containing a 'blob' entry with 3D probability data")
 
 # File upload
-uploaded_file = st.file_uploader("Choose an NPZ file", type=['npz'])
+uploaded_file = st.file_uploader("Choose an NPZ file", type=["npz"])
 
 if uploaded_file is not None:
     try:
         # Load NPZ file
         data = np.load(uploaded_file)
-        
+
         # Check what keys are present in the NPZ file
         keys = list(data.keys())
-        
+
         if len(keys) != 1:
-            st.error("NPZ file must contain exactly one entry, but found: " + ", ".join(keys))
+            st.error(
+                "NPZ file must contain exactly one entry, but found: " + ", ".join(keys)
+            )
         else:
             blob = data[keys[0]]
-            
+
             # Validate data
             if blob.ndim != 3:
                 st.error(f"Expected 3D array, got {blob.ndim}D array")
             elif blob.dtype != np.float64:
                 st.warning(f"Expected float64, got {blob.dtype}. Converting...")
                 blob = blob.astype(np.float64)
-            
+
             st.success(f"Loaded data with shape: {blob.shape}")
-            st.info(f"Non-zero values: {np.count_nonzero(blob)} / {blob.size} ({np.count_nonzero(blob)/blob.size*100:.2f}%)")
+            st.info(
+                f"Non-zero values: {np.count_nonzero(blob)} / {blob.size} ({np.count_nonzero(blob) / blob.size * 100:.2f}%)"
+            )
             st.info(f"Value range: [{blob.min():.4f}, {blob.max():.4f}]")
-            
+
             # Store transform stacks in session state (three stacks)
-            if 'transform_stacks' not in st.session_state:
+            if "transform_stacks" not in st.session_state:
                 st.session_state.transform_stacks = [[] for _ in range(3)]
 
             # Helper to render a stack editor for a plot
@@ -187,7 +249,11 @@ if uploaded_file is not None:
                 st.markdown("**Available transforms:**")
                 cols_small = st.columns([3, 1])
                 with cols_small[0]:
-                    to_add = st.selectbox(f"Transform to add (Stack {plot_idx+1})", options=list(TRANSFORM_CLASSES.keys()), key=f"add_select_{plot_idx}")
+                    to_add = st.selectbox(
+                        f"Transform to add (Stack {plot_idx + 1})",
+                        options=list(TRANSFORM_CLASSES.keys()),
+                        key=f"add_select_{plot_idx}",
+                    )
                 with cols_small[1]:
                     if st.button("Add", key=f"add_btn_{plot_idx}"):
                         # append with kwargs from constructor defaults when available
@@ -195,38 +261,42 @@ if uploaded_file is not None:
                         sig = inspect.signature(cls.__init__)
                         kwargs = {}
                         for name, param in sig.parameters.items():
-                            if name == 'self':
+                            if name == "self":
                                 continue
                             if param.default is not inspect._empty:
                                 kwargs[name] = param.default
                             else:
-                                kwargs[name] = ''
-                        stack.append({'class': to_add, 'kwargs': kwargs})
+                                kwargs[name] = ""
+                        stack.append({"class": to_add, "kwargs": kwargs})
                         st.session_state.transform_stacks[plot_idx] = stack
 
                 # Render existing stack items
                 for idx, item in enumerate(list(stack)):
-                    cls_name = item.get('class')
-                    kwargs = item.get('kwargs', {}) or {}
-                    with st.expander(f"{idx+1}. {cls_name}", expanded=False):
+                    cls_name = item.get("class")
+                    kwargs = item.get("kwargs", {}) or {}
+                    with st.expander(f"{idx + 1}. {cls_name}", expanded=False):
                         # Show remove button
                         if st.button("Remove", key=f"remove_{plot_idx}_{idx}"):
                             stack.pop(idx)
                             st.session_state.transform_stacks[plot_idx] = stack
                             # Some Streamlit installations don't expose experimental_rerun.
                             # Guard the call so we don't raise AttributeError.
-                            if hasattr(st, "experimental_rerun") and callable(getattr(st, "experimental_rerun")):
+                            if hasattr(st, "experimental_rerun") and callable(
+                                getattr(st, "experimental_rerun")
+                            ):
                                 st.experimental_rerun()
                             # If experimental_rerun isn't available, updating session_state is
                             # usually sufficient to trigger a rerun on next interaction.
                             # Avoid continuing to process this expander after mutating `stack`
                             # which would cause IndexError when accessing stack[idx].
                             return
-                        
+
                         # show inputs for kwargs
                         for param_name, param_val in kwargs.items():
                             widget_key = f"plot{plot_idx}_item{idx}_{param_name}"
-                            val = st.text_input(f"{param_name}", value=str(param_val), key=widget_key)
+                            val = st.text_input(
+                                f"{param_name}", value=str(param_val), key=widget_key
+                            )
                             cls = TRANSFORM_CLASSES.get(cls_name)
                             expected = None
                             if cls is not None:
@@ -237,7 +307,7 @@ if uploaded_file is not None:
                             parsed = parse_input_value(val, expected)
                             kwargs[param_name] = parsed
 
-                        stack[idx]['kwargs'] = kwargs
+                        stack[idx]["kwargs"] = kwargs
 
                 st.session_state.transform_stacks[plot_idx] = stack
 
@@ -246,7 +316,7 @@ if uploaded_file is not None:
             editor_cols = st.columns(3)
             for i, ecol in enumerate(editor_cols):
                 with ecol:
-                    st.subheader(f"Stack {i+1}")
+                    st.subheader(f"Stack {i + 1}")
                     render_stack_editor(i)
 
             # Now render the three plots in aligned columns (editors are above)
@@ -255,7 +325,7 @@ if uploaded_file is not None:
                 with pcol:
                     stack = st.session_state.transform_stacks[i]
                     sampled_data = instantiate_and_apply_stack(blob.copy(), stack)
-                    title = f"Plot {i+1}: {len(stack)} transforms"
+                    title = f"Plot {i + 1}: {len(stack)} transforms"
 
                     # Show stats
                     n_points = np.count_nonzero(sampled_data)
@@ -264,13 +334,32 @@ if uploaded_file is not None:
                     # Create and display plot with fixed scale
                     fig = create_3d_scatter(sampled_data, title, blob.shape)
                     st.plotly_chart(fig, use_container_width=True)
-            
+
+                    # Below each scatter, show a histogram of intensities for displayed points
+                    intensities = sampled_data[sampled_data > 0]
+                    if intensities.size > 0:
+                        # Normalize to [0,1] for consistency with color scale
+                        vmin = float(intensities.min())
+                        vmax = float(intensities.max())
+                        rng = vmax - vmin
+                        if rng > 0:
+                            intens_norm = (intensities - vmin) / (rng + 1e-9)
+                        else:
+                            intens_norm = np.zeros_like(intensities)
+                    else:
+                        intens_norm = intensities  # empty
+
+                    hist_fig = create_intensity_histogram(
+                        intens_norm, f"Intensity distribution {i + 1}"
+                    )
+                    st.plotly_chart(hist_fig, use_container_width=True)
+
     except Exception as e:
         st.error(f"Error loading file: {str(e)}")
         st.exception(e)
 else:
     st.info("👆 Upload an NPZ file to begin visualization")
-    
+
     # Show instructions
     with st.expander("ℹ️ Instructions"):
         st.markdown("""
