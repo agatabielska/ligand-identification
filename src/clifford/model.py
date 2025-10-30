@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from typing import Tuple, List, Optional
+from typing import List, Optional
 
 
 class ScalarShell(nn.Module):
@@ -98,18 +98,7 @@ class CGENN(nn.Module):
             x: Input multivectors (..., dim_mv) or (..., c_in, dim_mv)
         Returns:
             Output multivectors (..., c_out, dim_mv)
-        """
-        # Handle different input shapes
-        original_shape = x.shape
-        
-        # If input is (..., dim_mv), expand to (..., 1, dim_mv) for processing
-        if x.shape[-1] == self.dim_mv and len(x.shape) == 2:
-            # Shape is (batch, dim_mv) -> treat as (batch, 1, dim_mv)
-            x = x.unsqueeze(-2)  # (batch, 1, dim_mv)
-            expand_channels = True
-        else:
-            expand_channels = False
-        
+        """        
         # Process multivector structure
         # x shape: (..., c_in, dim_mv)
         x_proj = self.mv_projection(x)  # (..., c_in, hidden_dim)
@@ -271,7 +260,6 @@ class CliffordSteerableKernel(nn.Module):
         
         # Apply learnable kernel head transformation
         # Input: (c_out, c_in, k, k, k)
-        batch_size_for_conv = k_reduced.shape[0]
         k_reshaped = k_reduced.reshape(1, self.c_out * self.c_in, 
                                        self.kernel_size, self.kernel_size, self.kernel_size)
         
@@ -498,7 +486,7 @@ class CliffordSteerableNetwork(nn.Module):
         # Training loop
         for epoch in range(epochs):
             # Training phase
-            train_loss, train_acc = self._train_epoch(
+            train_loss, train_acc, train_top_10 = self._train_epoch(
                 train_loader, optimizer, criterion
             )
             
@@ -507,7 +495,7 @@ class CliffordSteerableNetwork(nn.Module):
             
             # Validation phase
             if val_loader is not None:
-                val_loss, val_acc = self._validate_epoch(val_loader, criterion)
+                val_loss, val_acc, val_top_10 = self._validate_epoch(val_loader, criterion)
                 self.history['val_loss'].append(val_loss)
                 self.history['val_acc'].append(val_acc)
                 
@@ -520,8 +508,8 @@ class CliffordSteerableNetwork(nn.Module):
                 # Print progress
                 if verbose:
                     print(f"Epoch [{epoch+1}/{epochs}] "
-                          f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}% | "
-                          f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%")
+                          f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%, Train Top-10: {train_top_10:.2f}% | "
+                          f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%, Val Top-10: {val_top_10:.2f}%")
                 
                 # Early stopping
                 if early_stopping_patience is not None:
@@ -542,7 +530,7 @@ class CliffordSteerableNetwork(nn.Module):
             else:
                 if verbose:
                     print(f"Epoch [{epoch+1}/{epochs}] "
-                          f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%")
+                          f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%, Train Top-10: {train_top_10:.2f}%")
         
         return self
     
@@ -551,9 +539,12 @@ class CliffordSteerableNetwork(nn.Module):
         self.train()
         total_loss = 0.0
         correct = 0
+        top_10_correct = 0
         total = 0
         
         for batch_idx, (data, target) in enumerate(train_loader):
+            print(f"  Training batch {batch_idx+1}/{len(train_loader)}", end='\r')
+            
             # Move data to device
             data, target = data.to(self.device), target.to(self.device)
             
@@ -570,18 +561,24 @@ class CliffordSteerableNetwork(nn.Module):
             total_loss += loss.item()
             pred = output.argmax(dim=1)
             correct += pred.eq(target).sum().item()
+            top_10 = output.topk(10, dim=1).indices
+            top_10_correct += np.sum(
+                [1 if target[i] in top_10[i] else 0 for i in range(target.size(0))]
+            )
             total += target.size(0)
         
         avg_loss = total_loss / len(train_loader)
         accuracy = 100.0 * correct / total
+        top_10_accuracy = 100.0 * top_10_correct / total
         
-        return avg_loss, accuracy
+        return avg_loss, accuracy, top_10_accuracy
     
     def _validate_epoch(self, val_loader, criterion):
         """Single validation epoch."""
         self.eval()
         total_loss = 0.0
         correct = 0
+        top_10_correct = 0
         total = 0
         
         with torch.no_grad():
@@ -594,12 +591,17 @@ class CliffordSteerableNetwork(nn.Module):
                 total_loss += loss.item()
                 pred = output.argmax(dim=1)
                 correct += pred.eq(target).sum().item()
+                top_10 = output.topk(10, dim=1).indices
+                top_10_correct += np.sum(
+                    [1 if target[i] in top_10[i] else 0 for i in range(target.size(0))]
+                )
                 total += target.size(0)
         
         avg_loss = total_loss / len(val_loader)
         accuracy = 100.0 * correct / total
+        top_10_accuracy = 100.0 * top_10_correct / total
         
-        return avg_loss, accuracy
+        return avg_loss, accuracy, top_10_accuracy
     
     def predict(self, x, batch_size: int = 32, return_probs: bool = False):
         """
@@ -670,11 +672,12 @@ class CliffordSteerableNetwork(nn.Module):
         if criterion is None:
             criterion = nn.CrossEntropyLoss()
         
-        test_loss, test_acc = self._validate_epoch(test_loader, criterion)
+        test_loss, test_acc, test_top_10 = self._validate_epoch(test_loader, criterion)
         
         metrics = {
             'test_loss': test_loss,
-            'test_accuracy': test_acc
+            'test_accuracy': test_acc,
+            'test_top_10_accuracy': test_top_10
         }
         
         return metrics
@@ -727,6 +730,15 @@ class CliffordSteerableNetwork(nn.Module):
             
         except ImportError:
             print("Matplotlib not available. Install it to plot training history.")
+            
+    def _n_params_to_weight_string(self, n_params: int) -> str:
+        """Convert number of parameters to human-readable string."""
+        if n_params >= 1e6:
+            return f"{n_params / 1e6:.2f}M"
+        elif n_params >= 1e3:
+            return f"{n_params / 1e3:.2f}K"
+        else:
+            return str(n_params)
     
     def summary(self):
         """Print model summary."""
@@ -737,8 +749,8 @@ class CliffordSteerableNetwork(nn.Module):
         total_params = sum(p.numel() for p in self.parameters())
         trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
         
-        print(f"Total parameters: {total_params:,}")
-        print(f"Trainable parameters: {trainable_params:,}")
+        print(f"Total parameters: {total_params:,} ({self._n_params_to_weight_string(total_params)})")
+        print(f"Trainable parameters: {trainable_params:,} ({self._n_params_to_weight_string(trainable_params)})")
         print(f"Device: {self.device}")
         print(f"Output classes: {self.out_channels}")
         print("=" * 70)
@@ -748,103 +760,3 @@ class CliffordSteerableNetwork(nn.Module):
         print(self.features)
         print(self.classifier)
         print("=" * 70)
-
-
-# Example usage
-if __name__ == "__main__":
-    print("=" * 70)
-    print("Clifford Steerable Convolution - Example Usage")
-    print("=" * 70)
-    
-    # Setup: 3D Euclidean space -> Cl(3,0)
-    p, q = 3, 0
-    
-    # Create learnable steerable network with 219 classes
-    model = CliffordSteerableNetwork(
-        p=p, q=q,
-        in_channels=4,
-        hidden_channels=[32, 64, 128],  # Increased capacity for more classes
-        out_channels=219,  # 219 classes
-        n_shells=3,
-        kernel_size=3,
-        learning_rate=1e-3
-    )
-    
-    # Show model summary
-    model.summary()
-    
-    print("\n" + "=" * 70)
-    print("Creating synthetic dataset for demonstration...")
-    print("=" * 70)
-    
-    # Create synthetic dataset
-    n_train = 500  # Increased for more classes
-    n_val = 100
-    n_test = 100
-    
-    X_train = torch.randn(n_train, 1, 32, 32, 32)
-    y_train = torch.randint(0, 219, (n_train,))  # 219 classes
-    
-    X_val = torch.randn(n_val, 1, 32, 32, 32)
-    y_val = torch.randint(0, 219, (n_val,))
-    
-    X_test = torch.randn(n_test, 1, 32, 32, 32)
-    y_test = torch.randint(0, 219, (n_test,))
-    
-    # Create data loaders
-    train_dataset = torch.utils.data.TensorDataset(X_train, y_train)
-    val_dataset = torch.utils.data.TensorDataset(X_val, y_val)
-    test_dataset = torch.utils.data.TensorDataset(X_test, y_test)
-    
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=8, shuffle=True)  # Smaller batch for more classes
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=8, shuffle=False)
-    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=8, shuffle=False)
-    
-    print(f"Train samples: {len(train_dataset)}")
-    print(f"Validation samples: {len(val_dataset)}")
-    print(f"Test samples: {len(test_dataset)}")
-    print(f"Number of classes: 219")
-    
-    # Train the model (scikit-learn style!)
-    print("\n" + "=" * 70)
-    print("Training model with .fit() method...")
-    print("=" * 70)
-    
-    model.fit(
-        train_loader,
-        val_loader=val_loader,
-        epochs=50,
-        verbose=True,
-        early_stopping_patience=10,
-        checkpoint_path='best_model_219classes.pth'
-    )
-    
-    # Evaluate on test set
-    print("\n" + "=" * 70)
-    print("Evaluating on test set...")
-    print("=" * 70)
-    
-    metrics = model.evaluate(test_loader)
-    print(f"Test Loss: {metrics['test_loss']:.4f}")
-    print(f"Test Accuracy: {metrics['test_accuracy']:.2f}%")
-    
-    # Make predictions (scikit-learn style!)
-    print("\n" + "=" * 70)
-    print("Making predictions with .predict() method...")
-    print("=" * 70)
-    
-    # Predict classes
-    predictions = model.predict(X_test[:5])
-    print(f"Predicted classes: {predictions}")
-    print(f"True classes: {y_test[:5].numpy()}")
-    
-    # Predict probabilities
-    probabilities = model.predict_proba(X_test[:5])
-    print(f"\nPredicted probabilities shape: {probabilities.shape}")
-    print(f"Top-5 predicted classes for first sample:")
-    top5_indices = probabilities[0].argsort()[-5:][::-1]
-    for i, idx in enumerate(top5_indices):
-        print(f"  {i+1}. Class {idx}: {probabilities[0][idx]:.4f}")
-    
-    # Uncomment to plot training history (requires matplotlib)
-    # model.plot_history()
