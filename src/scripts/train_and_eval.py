@@ -1,11 +1,10 @@
 import os
 import sys
-
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from pipeline.pipeline import Pipeline
 from pipeline.data_loader import NPZDataLoader
-from clifford.model import CliffordSteerableNetwork
+from models.clifford.model import CliffordSteerableNetwork
 from utils.sampling_strategies import ProbabilisticSelectionTransform
 import numpy as np
 

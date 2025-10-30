@@ -187,7 +187,7 @@ class NPZDataLoader:
         
         # Get all class directories
         # TODO: handle small classes
-        class_dirs = [d for d in self.root_dir.iterdir() if d.is_dir() and len(list(d.glob(self.file_pattern))) > 2]
+        class_dirs = [d for d in self.root_dir.iterdir() if d.is_dir()]
         
         if len(class_dirs) == 0:
             raise ValueError(f"No class directories found in {self.root_dir}")

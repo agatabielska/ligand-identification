@@ -5,12 +5,9 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "numpy>=2.3.4",
     "plotly>=6.3.1",
     "scikit-learn>=1.7.2",
     "streamlit>=1.50.0",
-]
-
-[tool.uv.workspace]
-members = [
-    "src/clifford",
+    "torch>=2.9.0",
 ]

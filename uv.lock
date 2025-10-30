@@ -2,12 +2,6 @@ version = 1
 revision = 3
 requires-python = ">=3.12"
 
-[manifest]
-members = [
-    "clifford",
-    "ligand-identification",
-]
-
 [[package]]
 name = "altair"
 version = "5.5.0"
@@ -130,21 +124,6 @@ wheels = [
 ]
 
 [[package]]
-name = "clifford"
-version = "0.1.0"
-source = { virtual = "src/clifford" }
-dependencies = [
-    { name = "scikit-learn" },
-    { name = "torch" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "scikit-learn", specifier = ">=1.7.2" },
-    { name = "torch", specifier = ">=2.9.0" },
-]
-
-[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -257,16 +236,20 @@ name = "ligand-identification"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "numpy" },
     { name = "plotly" },
     { name = "scikit-learn" },
     { name = "streamlit" },
+    { name = "torch" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "numpy", specifier = ">=2.3.4" },
     { name = "plotly", specifier = ">=6.3.1" },
     { name = "scikit-learn", specifier = ">=1.7.2" },
     { name = "streamlit", specifier = ">=1.50.0" },
+    { name = "torch", specifier = ">=2.9.0" },
 ]
 
 [[package]]
