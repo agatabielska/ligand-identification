@@ -127,20 +127,19 @@ organize_file() {
     local file="$1"
     local filename=$(basename "$file")
     
-    # Extract ligand name (last 3 characters before .npz)
-    # Format: 3J9L_C_1301_DTP.npz -> DTP
+    # Extract ligand name
     local ligand="${filename%.npz}"
     ligand="${ligand##*_}"
-    
-    # Check if ligand exists in mapping
-    if [[ -n "${LIGAND_TO_FOLDER[$ligand]}" ]]; then
-        local folder="${LIGAND_TO_FOLDER[$ligand]}"
+
+    # Look up folder from file instead of array
+    local folder=$(grep "^${ligand}:" /tmp/ligand_to_folder_map.txt | cut -d':' -f2)
+
+    if [[ -n "$folder" ]]; then
         local safe_folder=$(echo "$folder" | tr '/' '_' | tr '\\' '_')
         local dest="$SOURCE_DIR/$safe_folder/$filename"
-        
-        # Try hard link first (instant, no space), fallback to move
+
         if ln "$file" "$dest" 2>/dev/null; then
-            rm "$file"  # Remove original after hard link
+            rm "$file"
             echo "linked:$filename"
         else
             mv "$file" "$dest" 2>/dev/null && echo "moved:$filename" || echo "error:$filename"
@@ -150,9 +149,13 @@ organize_file() {
     fi
 }
 
+> /tmp/ligand_to_folder_map.txt
+for ligand in "${!LIGAND_TO_FOLDER[@]}"; do
+    echo "$ligand:${LIGAND_TO_FOLDER[$ligand]}" >> /tmp/ligand_to_folder_map.txt
+done
+
 export -f organize_file
 export SOURCE_DIR
-export -A LIGAND_TO_FOLDER
 
 # Process files in parallel
 SUCCESS=0
@@ -222,4 +225,5 @@ echo "  Memory optimization: Loaded only $MAPPING_COUNT/$((30000)) CSV entries"
 echo "=========================================="
 
 # Cleanup
-rm -f /tmp/organize_results.txt /tmp/ligand_mapping.txt /tmp/required_ligands.txt
+# Cleanup
+rm -f /tmp/organize_results.txt /tmp/ligand_mapping.txt /tmp/required_ligands.txt /tmp/ligand_to_folder_map.txt
