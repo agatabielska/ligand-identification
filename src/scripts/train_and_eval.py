@@ -1,13 +1,13 @@
 import os
 import sys
 
-import numpy as np
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from pipeline.pipeline import Pipeline
 from pipeline.data_loader import NPZDataLoader
 from clifford.model import CliffordSteerableNetwork
 from utils.sampling_strategies import ProbabilisticSelectionTransform
+import numpy as np
 
 if __name__ == "__main__":
     print("=" * 70)
@@ -45,8 +45,8 @@ if __name__ == "__main__":
     model = CliffordSteerableNetwork(
         p=p, q=q,
         in_channels=3,
-        hidden_channels=[32, 64],
-        out_channels=569,  # 569 classes
+        hidden_channels=[32, 64, 128], # Size of the last hidden layer determines the classifier input size
+        out_channels=569,  # Number of ligand classes
         n_shells=3,
         kernel_size=3,
         learning_rate=1e-3

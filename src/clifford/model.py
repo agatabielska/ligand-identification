@@ -414,7 +414,13 @@ class CliffordSteerableNetwork(nn.Module):
         
         # Global pooling and classifier
         self.pool = nn.AdaptiveAvgPool3d(1)
-        self.classifier = nn.Linear(prev_c, out_channels)
+        # TODO: Check if this additional Linear layer is necessary
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(prev_c, 512),
+            nn.ReLU(),
+            nn.Linear(512, out_channels)
+        )
         
         # Training history
         self.history = {
@@ -430,7 +436,6 @@ class CliffordSteerableNetwork(nn.Module):
     def forward(self, x):
         x = self.features(x)
         x = self.pool(x)
-        x = x.view(x.size(0), -1)
         x = self.classifier(x)
         return x
     
@@ -542,8 +547,9 @@ class CliffordSteerableNetwork(nn.Module):
         top_10_correct = 0
         total = 0
         
+        
         for batch_idx, (data, target) in enumerate(train_loader):
-            print(f"  Training batch {batch_idx+1}/{len(train_loader)}", end='\r')
+            print(f"\tTraining batch {batch_idx+1}/{len(train_loader)}", end='\r')
             
             # Move data to device
             data, target = data.to(self.device), target.to(self.device)
