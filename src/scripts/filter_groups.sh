@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/bash
 
 # Cluster Consolidation Script
 # Consolidates small clusters (<100 files) and organizes rare ligands

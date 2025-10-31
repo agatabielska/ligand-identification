@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/bash
 
 # Ligand File Organizer by Cluster (Optimized)
 # Organizes .npz files into folders based on ligand_mapping.csv
@@ -10,6 +10,7 @@ SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/"
 
 # Configuration
 MAPPING_CSV="${SCRIPT_DIR}../../data/ligand_mapping.csv"
+REQUIRED_TXT="${SCRIPT_DIR}../../required_ligands.txt"
 SOURCE_DIR="${SCRIPT_DIR}../../data/cryoem_blobs"
 MAX_WORKERS="${1:-16}"  # Default 16 workers, can override with first argument
 
@@ -54,23 +55,28 @@ echo "Found $TOTAL_FILES .npz files to organize"
 
 echo -e "\n${BLUE}[2/5] Extracting required ligands from filenames...${NC}"
 
-# Extract unique ligands from filenames
-declare -A REQUIRED_LIGANDS
-for file in "${NPZ_FILES[@]}"; do
-    filename=$(basename "$file")
-    ligand="${filename%.npz}"
-    ligand="${ligand##*_}"
-    REQUIRED_LIGANDS["$ligand"]=1
-done
+# Check if required_ligands.txt exists
+if [[ -f "$REQUIRED_TXT" ]]; then
+    echo "Loading required ligands from $REQUIRED_TXT"
+else
+    # Extract unique ligands from filenames
+    declare -A REQUIRED_LIGANDS
+    for file in "${NPZ_FILES[@]}"; do
+        filename=$(basename "$file")
+        ligand="${filename%.npz}"
+        ligand="${ligand##*_}"
+        REQUIRED_LIGANDS["$ligand"]=1
+    done
 
-UNIQUE_LIGANDS=${#REQUIRED_LIGANDS[@]}
-echo "Identified $UNIQUE_LIGANDS unique ligands to lookup"
+    UNIQUE_LIGANDS=${#REQUIRED_LIGANDS[@]}
+    echo "Identified $UNIQUE_LIGANDS unique ligands to lookup"
 
-# Save required ligands to temp file for awk filtering
-> /tmp/required_ligands.txt
-for ligand in "${!REQUIRED_LIGANDS[@]}"; do
-    echo "$ligand" >> /tmp/required_ligands.txt
-done
+    # Save required ligands to temp file for awk filtering
+    > "$REQUIRED_TXT"
+    for ligand in "${!REQUIRED_LIGANDS[@]}"; do
+        echo "$ligand" >> "$REQUIRED_TXT"
+    done
+fi
 
 echo -e "\n${BLUE}[3/5] Loading relevant mappings from CSV...${NC}"
 
@@ -226,4 +232,4 @@ echo "=========================================="
 
 # Cleanup
 # Cleanup
-rm -f /tmp/organize_results.txt /tmp/ligand_mapping.txt /tmp/required_ligands.txt /tmp/ligand_to_folder_map.txt
+rm -f /tmp/organize_results.txt /tmp/ligand_mapping.txt /tmp/ligand_to_folder_map.txt
