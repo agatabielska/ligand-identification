@@ -1,7 +1,10 @@
 *.pyc
 *.npz
 
-/data/
+/data/*.npz
+/data/*.csv
+/data/*.zip
+/data/*.tar*
 /.venv/
 **/__pycache__/
 *.pth

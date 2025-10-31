@@ -2,6 +2,7 @@
 
 # Ligand File Organizer by Cluster (Optimized)
 # Organizes .npz files into folders based on ligand_mapping.csv
+# Creates individual folders for unmatched ligands
 
 set -e  # Exit on error
 
@@ -10,7 +11,7 @@ SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/"
 
 # Configuration
 MAPPING_CSV="${SCRIPT_DIR}../../data/ligand_mapping.csv"
-REQUIRED_TXT="${SCRIPT_DIR}../../required_ligands.txt"
+REQUIRED_LIGANDS="${SCRIPT_DIR}../../data/required_ligands_cryoem.txt"
 SOURCE_DIR="${SCRIPT_DIR}../../data/cryoem_blobs"
 MAX_WORKERS="${1:-16}"  # Default 16 workers, can override with first argument
 
@@ -55,9 +56,9 @@ echo "Found $TOTAL_FILES .npz files to organize"
 
 echo -e "\n${BLUE}[2/5] Extracting required ligands from filenames...${NC}"
 
-# Check if required_ligands.txt exists
-if [[ -f "$REQUIRED_TXT" ]]; then
-    echo "Loading required ligands from $REQUIRED_TXT"
+# Check if required_ligands_cryoem.txt exists
+if [[ -f "$REQUIRED_LIGANDS" ]]; then
+    echo "Loading required ligands from $REQUIRED_LIGANDS"
 else
     # Extract unique ligands from filenames
     declare -A REQUIRED_LIGANDS
@@ -72,9 +73,9 @@ else
     echo "Identified $UNIQUE_LIGANDS unique ligands to lookup"
 
     # Save required ligands to temp file for awk filtering
-    > "$REQUIRED_TXT"
+    > "$REQUIRED_LIGANDS"
     for ligand in "${!REQUIRED_LIGANDS[@]}"; do
-        echo "$ligand" >> "$REQUIRED_TXT"
+        echo "$ligand" >> "$REQUIRED_LIGANDS"
     done
 fi
 
@@ -83,7 +84,7 @@ echo -e "\n${BLUE}[3/5] Loading relevant mappings from CSV...${NC}"
 # Use awk to filter CSV for only required ligands (much faster than bash loops)
 # This loads only needed rows instead of all 30k entries
 awk -F',' 'NR==1 {next}  # Skip header
-FNR==NR {ligands[$1]=1; next}  # Build lookup table from required_ligands.txt
+FNR==NR {ligands[$1]=1; next}  # Build lookup table from required_ligands_cryoem.txt
 {
     ligand=$2
     gsub(/^[ \t\r\n"]+|[ \t\r\n"]+$/, "", ligand)  # Trim whitespace and quotes
@@ -92,7 +93,7 @@ FNR==NR {ligands[$1]=1; next}  # Build lookup table from required_ligands.txt
         gsub(/^[ \t\r\n"]+|[ \t\r\n"]+$/, "", folder)  # Trim whitespace and quotes
         print ligand ":" folder
     }
-}' /tmp/required_ligands.txt "$MAPPING_CSV" > /tmp/ligand_mapping.txt
+}' "$REQUIRED_LIGANDS" "$MAPPING_CSV" > /tmp/ligand_mapping.txt
 
 # Load filtered mapping into associative array
 declare -A LIGAND_TO_FOLDER
@@ -102,11 +103,6 @@ done < /tmp/ligand_mapping.txt
 
 MAPPING_COUNT=${#LIGAND_TO_FOLDER[@]}
 echo "Loaded $MAPPING_COUNT ligand-to-folder mappings (filtered from CSV)"
-
-if [[ $MAPPING_COUNT -eq 0 ]]; then
-    echo -e "${RED}❌ Error: No matching ligands found in CSV${NC}"
-    exit 1
-fi
 
 echo -e "\n${BLUE}[4/5] Creating cluster folders...${NC}"
 
@@ -138,7 +134,7 @@ organize_file() {
     ligand="${ligand##*_}"
 
     # Look up folder from file instead of array
-    local folder=$(grep "^${ligand}:" /tmp/ligand_to_folder_map.txt | cut -d':' -f2)
+    local folder=$(grep "^${ligand}:" /tmp/ligand_to_folder_map.txt 2>/dev/null | cut -d':' -f2)
 
     if [[ -n "$folder" ]]; then
         local safe_folder=$(echo "$folder" | tr '/' '_' | tr '\\' '_')
@@ -151,7 +147,17 @@ organize_file() {
             mv "$file" "$dest" 2>/dev/null && echo "moved:$filename" || echo "error:$filename"
         fi
     else
-        echo "unmatched:$filename:$ligand"
+        # Create individual folder for unmatched ligand
+        local safe_ligand=$(echo "$ligand" | tr '/' '_' | tr '\\' '_')
+        mkdir -p "$SOURCE_DIR/$safe_ligand"
+        local dest="$SOURCE_DIR/$safe_ligand/$filename"
+        
+        if ln "$file" "$dest" 2>/dev/null; then
+            rm "$file"
+            echo "unmatched_linked:$filename:$ligand"
+        else
+            mv "$file" "$dest" 2>/dev/null && echo "unmatched_moved:$filename:$ligand" || echo "error:$filename"
+        fi
     fi
 }
 
@@ -199,21 +205,28 @@ while IFS=':' read -r status filename ligand; do
             ((SUCCESS++))
             ((MOVED++))
             ;;
+        unmatched_linked)
+            ((SUCCESS++))
+            ((UNMATCHED++))
+            echo "$filename (ligand: $ligand) -> created folder: $ligand/" >> /tmp/unmatched_files.log
+            ;;
+        unmatched_moved)
+            ((SUCCESS++))
+            ((UNMATCHED++))
+            echo "$filename (ligand: $ligand) -> created folder: $ligand/" >> /tmp/unmatched_files.log
+            ;;
         error)
             ((ERRORS++))
             echo "$filename" >> /tmp/organization_errors.log
-            ;;
-        unmatched)
-            ((UNMATCHED++))
-            echo "$filename (extracted ligand: $ligand)" >> /tmp/unmatched_files.log
             ;;
     esac
 done < /tmp/organize_results.txt
 
 echo -e "\n=========================================="
 echo -e "${GREEN}✓ Successfully organized $SUCCESS files${NC}"
-echo "  - Hard linked: $LINKED"
-echo "  - Moved: $MOVED"
+echo "  - Matched and linked: $LINKED"
+echo "  - Matched and moved: $MOVED"
+echo "  - Unmatched (individual folders): $UNMATCHED"
 
 if [[ $ERRORS -gt 0 ]]; then
     echo -e "\n${YELLOW}⚠ Encountered $ERRORS errors${NC}"
@@ -221,15 +234,14 @@ if [[ $ERRORS -gt 0 ]]; then
 fi
 
 if [[ $UNMATCHED -gt 0 ]]; then
-    echo -e "\n${YELLOW}⚠ $UNMATCHED unmatched files${NC}"
-    echo "  Unmatched files saved to: /tmp/unmatched_files.log"
+    echo -e "\n${BLUE}ℹ $UNMATCHED files placed in individual ligand folders${NC}"
+    echo "  Unmatched files log saved to: /tmp/unmatched_files.log"
 fi
 
 echo -e "\n${GREEN}✓ Organization complete!${NC}"
 echo "  Source directory: $(realpath "$SOURCE_DIR")"
-echo "  Memory optimization: Loaded only $MAPPING_COUNT/$((30000)) CSV entries"
+echo "  Memory optimization: Loaded only $MAPPING_COUNT CSV entries"
 echo "=========================================="
 
-# Cleanup
 # Cleanup
 rm -f /tmp/organize_results.txt /tmp/ligand_mapping.txt /tmp/ligand_to_folder_map.txt
