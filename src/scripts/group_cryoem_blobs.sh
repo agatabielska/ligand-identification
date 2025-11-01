@@ -1,10 +1,8 @@
-#!/usr/bin/bash
+#!/bin/bash
 
 # Ligand File Organizer by Cluster (Optimized)
 # Organizes .npz files into folders based on ligand_mapping.csv
-# Creates individual folders for unmatched ligands
 
-set -e  # Exit on error
 
 # Get script directory
 SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/"
@@ -59,29 +57,28 @@ echo -e "\n${BLUE}[2/5] Extracting required ligands from filenames...${NC}"
 # Check if required_ligands_cryoem.txt exists
 if [[ -f "$REQUIRED_LIGANDS" ]]; then
     echo "Loading required ligands from $REQUIRED_LIGANDS"
+    UNIQUE_LIGANDS=$(wc -l < "$REQUIRED_LIGANDS")
+    echo "Loaded $UNIQUE_LIGANDS unique ligands"
 else
-    # Extract unique ligands from filenames
-    count=0
-    declare -A REQUIRED_LIGANDS
-    for file in "${NPZ_FILES[@]}"; do
-        filename=$(basename "$file")
-        ligand="${filename%.npz}"
+    # Extract unique ligands from filenames using parallel processing
+    extract_ligand() {
+        local file="$1"
+        local filename=$(basename "$file")
+        local ligand="${filename%.npz}"
         ligand="${ligand##*_}"
-        REQUIRED_LIGANDS["$ligand"]=1
-        count=$((count + 1))
-        if (( count % 1000 == 0 )); then
-            echo "  Processed $count files..."
-        fi
-    done
+        echo "$ligand"
+    }
 
-    UNIQUE_LIGANDS=${#REQUIRED_LIGANDS[@]}
+    export -f extract_ligand
+
+    echo "Using xargs with $MAX_WORKERS workers for extraction..."
+    printf '%s\n' "${NPZ_FILES[@]}" | \
+        xargs -P "$MAX_WORKERS" -I {} bash -c 'extract_ligand "$@"' _ {} | \
+        sort -u > "$REQUIRED_LIGANDS"
+
+    UNIQUE_LIGANDS=$(wc -l < "$REQUIRED_LIGANDS")
     echo "Identified $UNIQUE_LIGANDS unique ligands to lookup"
-
-    # Save required ligands to temp file for awk filtering
-    > "$REQUIRED_LIGANDS"
-    for ligand in "${!REQUIRED_LIGANDS[@]}"; do
-        echo "$ligand" >> "$REQUIRED_LIGANDS"
-    done
+    echo "Saved to $REQUIRED_LIGANDS for future runs"
 fi
 
 echo -e "\n${BLUE}[3/5] Loading relevant mappings from CSV...${NC}"
@@ -98,16 +95,21 @@ FNR==NR {ligands[$1]=1; next}  # Build lookup table from required_ligands_cryoem
         gsub(/^[ \t\r\n"]+|[ \t\r\n"]+$/, "", folder)  # Trim whitespace and quotes
         print ligand ":" folder
     }
-}' "$REQUIRED_LIGANDS" "$MAPPING_CSV" > /tmp/ligand_mapping.txt
+}' "$REQUIRED_LIGANDS" "$MAPPING_CSV" > /tmp/ligand_mapping_cryoem.txt
 
 # Load filtered mapping into associative array
 declare -A LIGAND_TO_FOLDER
 while IFS=':' read -r ligand folder; do
     LIGAND_TO_FOLDER["$ligand"]="$folder"
-done < /tmp/ligand_mapping.txt
+done < /tmp/ligand_mapping_cryoem.txt
 
 MAPPING_COUNT=${#LIGAND_TO_FOLDER[@]}
 echo "Loaded $MAPPING_COUNT ligand-to-folder mappings (filtered from CSV)"
+
+if [[ $MAPPING_COUNT -eq 0 ]]; then
+    echo -e "${RED}❌ Error: No matching ligands found in CSV${NC}"
+    exit 1
+fi
 
 echo -e "\n${BLUE}[4/5] Creating cluster folders...${NC}"
 
@@ -133,15 +135,16 @@ echo -e "\n${BLUE}[5/5] Organizing files into clusters...${NC}"
 organize_file() {
     local file="$1"
     local filename=$(basename "$file")
-    
-    # Extract ligand name
+
+    # Extract ligand name (last part after underscore for cryoem)
     local ligand="${filename%.npz}"
     ligand="${ligand##*_}"
 
     # Look up folder from file instead of array
-    local folder=$(grep "^${ligand}:" /tmp/ligand_to_folder_map.txt 2>/dev/null | cut -d':' -f2)
+    local folder=$(grep "^${ligand}:" /tmp/ligand_to_folder_map_cryoem.txt | cut -d':' -f2)
 
     if [[ -n "$folder" ]]; then
+        # Matched: use cluster folder
         local safe_folder=$(echo "$folder" | tr '/' '_' | tr '\\' '_')
         local dest="$SOURCE_DIR/$safe_folder/$filename"
 
@@ -152,23 +155,23 @@ organize_file() {
             mv "$file" "$dest" 2>/dev/null && echo "moved:$filename" || echo "error:$filename"
         fi
     else
-        # Create individual folder for unmatched ligand
-        local safe_ligand=$(echo "$ligand" | tr '/' '_' | tr '\\' '_')
-        mkdir -p "$SOURCE_DIR/$safe_ligand"
-        local dest="$SOURCE_DIR/$safe_ligand/$filename"
-        
+        # Unmatched: create folder with ligand name
+        local ligand_folder="$SOURCE_DIR/$ligand"
+        mkdir -p "$ligand_folder"
+        local dest="$ligand_folder/$filename"
+
         if ln "$file" "$dest" 2>/dev/null; then
             rm "$file"
-            echo "unmatched_linked:$filename:$ligand"
+            echo "ligand_linked:$filename:$ligand"
         else
-            mv "$file" "$dest" 2>/dev/null && echo "unmatched_moved:$filename:$ligand" || echo "error:$filename"
+            mv "$file" "$dest" 2>/dev/null && echo "ligand_moved:$filename:$ligand" || echo "error:$filename"
         fi
     fi
 }
 
-> /tmp/ligand_to_folder_map.txt
+> /tmp/ligand_to_folder_map_cryoem.txt
 for ligand in "${!LIGAND_TO_FOLDER[@]}"; do
-    echo "$ligand:${LIGAND_TO_FOLDER[$ligand]}" >> /tmp/ligand_to_folder_map.txt
+    echo "$ligand:${LIGAND_TO_FOLDER[$ligand]}" >> /tmp/ligand_to_folder_map_cryoem.txt
 done
 
 export -f organize_file
@@ -178,27 +181,36 @@ export SOURCE_DIR
 SUCCESS=0
 LINKED=0
 MOVED=0
+LIGAND_LINKED=0
+LIGAND_MOVED=0
 ERRORS=0
-UNMATCHED=0
 
 if command -v parallel &> /dev/null; then
     # Use GNU parallel if available (faster with progress bar)
     echo "Using GNU parallel with $MAX_WORKERS workers..."
-    
+
     printf '%s\n' "${NPZ_FILES[@]}" | \
-        parallel -j "$MAX_WORKERS" --bar organize_file {} > /tmp/organize_results.txt
+        parallel -j "$MAX_WORKERS" --bar organize_file {} > /tmp/organize_results_cryoem.txt
 else
     # Fallback to xargs
     echo "Using xargs with $MAX_WORKERS workers..."
     echo -e "${YELLOW}Tip: Install GNU parallel for progress tracking: sudo apt-get install parallel${NC}"
-    
+
     printf '%s\n' "${NPZ_FILES[@]}" | \
-        xargs -P "$MAX_WORKERS" -I {} bash -c 'organize_file "$@"' _ {} > /tmp/organize_results.txt
+        xargs -P "$MAX_WORKERS" -I {} bash -c 'organize_file "$@"' _ {} > /tmp/organize_results_cryoem.txt
+fi
+
+wait
+
+# Check if any .npz files remain
+REMAINING=$(find "$SOURCE_DIR" -maxdepth 1 -type f -name "*.npz" 2>/dev/null | wc -l)
+if [[ $REMAINING -eq 0 ]]; then
+    echo "All .npz files processed"
 fi
 
 # Process results
-> /tmp/unmatched_files.log
-> /tmp/organization_errors.log
+> /tmp/ligand_name_folders_cryoem.log
+> /tmp/organization_errors_cryoem.log
 
 while IFS=':' read -r status filename ligand; do
     case "$status" in
@@ -210,43 +222,46 @@ while IFS=':' read -r status filename ligand; do
             ((SUCCESS++))
             ((MOVED++))
             ;;
-        unmatched_linked)
+        ligand_linked)
             ((SUCCESS++))
-            ((UNMATCHED++))
-            echo "$filename (ligand: $ligand) -> created folder: $ligand/" >> /tmp/unmatched_files.log
+            ((LIGAND_LINKED++))
+            echo "$filename -> $ligand/" >> /tmp/ligand_name_folders_cryoem.log
             ;;
-        unmatched_moved)
+        ligand_moved)
             ((SUCCESS++))
-            ((UNMATCHED++))
-            echo "$filename (ligand: $ligand) -> created folder: $ligand/" >> /tmp/unmatched_files.log
+            ((LIGAND_MOVED++))
+            echo "$filename -> $ligand/" >> /tmp/ligand_name_folders_cryoem.log
             ;;
         error)
             ((ERRORS++))
-            echo "$filename" >> /tmp/organization_errors.log
+            echo "$filename" >> /tmp/organization_errors_cryoem.log
             ;;
     esac
-done < /tmp/organize_results.txt
+done < /tmp/organize_results_cryoem.txt
 
 echo -e "\n=========================================="
 echo -e "${GREEN}✓ Successfully organized $SUCCESS files${NC}"
-echo "  - Matched and linked: $LINKED"
-echo "  - Matched and moved: $MOVED"
-echo "  - Unmatched (individual folders): $UNMATCHED"
+echo "  - Cluster folders (hard linked): $LINKED"
+echo "  - Cluster folders (moved): $MOVED"
+echo "  - Ligand name folders (hard linked): $LIGAND_LINKED"
+echo "  - Ligand name folders (moved): $LIGAND_MOVED"
 
 if [[ $ERRORS -gt 0 ]]; then
     echo -e "\n${YELLOW}⚠ Encountered $ERRORS errors${NC}"
-    echo "  Error details saved to: /tmp/organization_errors.log"
+    echo "  Error details saved to: /tmp/organization_errors_cryoem.log"
 fi
 
-if [[ $UNMATCHED -gt 0 ]]; then
-    echo -e "\n${BLUE}ℹ $UNMATCHED files placed in individual ligand folders${NC}"
-    echo "  Unmatched files log saved to: /tmp/unmatched_files.log"
+if [[ $((LIGAND_LINKED + LIGAND_MOVED)) -gt 0 ]]; then
+    echo -e "\n${BLUE}ℹ $((LIGAND_LINKED + LIGAND_MOVED)) files organized into ligand name folders${NC}"
+    echo "  Details saved to: /tmp/ligand_name_folders_cryoem.log"
 fi
 
 echo -e "\n${GREEN}✓ Organization complete!${NC}"
 echo "  Source directory: $(realpath "$SOURCE_DIR")"
-echo "  Memory optimization: Loaded only $MAPPING_COUNT CSV entries"
+echo "  Memory optimization: Loaded only $MAPPING_COUNT/$((30000)) CSV entries"
 echo "=========================================="
 
 # Cleanup
-rm -f /tmp/organize_results.txt /tmp/ligand_mapping.txt /tmp/ligand_to_folder_map.txt
+rm -f /tmp/organize_results_cryoem.txt /tmp/ligand_mapping_cryoem.txt /tmp/ligand_to_folder_map_cryoem.txt
+
+exit 0
