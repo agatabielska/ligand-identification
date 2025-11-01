@@ -32,7 +32,6 @@ CryoEM:
 ```bash
 ./src/scripts/group_cryoem_blobs.sh
 ```
-TODO: test it
 X-ray:
 ```bash
 ./src/scripts/group_xray_blobs.sh

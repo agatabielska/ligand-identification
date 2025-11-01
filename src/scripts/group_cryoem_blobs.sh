@@ -61,12 +61,17 @@ if [[ -f "$REQUIRED_LIGANDS" ]]; then
     echo "Loading required ligands from $REQUIRED_LIGANDS"
 else
     # Extract unique ligands from filenames
+    count=0
     declare -A REQUIRED_LIGANDS
     for file in "${NPZ_FILES[@]}"; do
         filename=$(basename "$file")
         ligand="${filename%.npz}"
         ligand="${ligand##*_}"
         REQUIRED_LIGANDS["$ligand"]=1
+        count=$((count + 1))
+        if (( count % 1000 == 0 )); then
+            echo "  Processed $count files..."
+        fi
     done
 
     UNIQUE_LIGANDS=${#REQUIRED_LIGANDS[@]}
