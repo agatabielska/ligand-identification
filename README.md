@@ -37,14 +37,16 @@ X-ray:
 ./src/scripts/group_xray_blobs.sh
 ```
 ### Filter out small classes
-TODO: create a get_rate_groups.sh which requires unpacked, grouped ligands of both types, filter script require rare_groups.txt
-TODO: change and test it
+Find frequent ligand groups (>=100 samples):
+```bash
+./src/scripts/get_frequent_groups.sh
+```
+Then filter out small classes:
 CryoEM:
 ```bash
 ./src/scripts/filter_cryoem_groups.sh
 ```
 X-ray:
-TODO: create amd test it
 ```bash
 ./src/scripts/filter_xray_groups.sh
 ```
