@@ -26,7 +26,7 @@ if __name__ == "__main__":
     
     # Create dataloader with point cloud preprocessing
     data_loader = NPZDataLoader(
-        root_dir="../../data/cryoem_blobs/grouped_blobs",  # Change this to your data directory
+        root_dir="../../data/xray_blobs",  # Change this to your data directory
         preprocess_fn=preprocess,
         npz_key=None,  # Use first key in NPZ file
         train_split=0.7,
@@ -66,8 +66,10 @@ if __name__ == "__main__":
         epochs=50,
         verbose=True,
         early_stopping_patience=10,
-        checkpoint_path='best_model.pth'
+        checkpoint_path='../../data/best_model.pth'
     )
+    
+    model.save('../../data/final_model.pth')
     
     # Evaluate on test set
     print("\n" + "=" * 70)

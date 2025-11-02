@@ -55,7 +55,11 @@ process_folder() {
     local file_count=0
     for file in "$folder"/*; do
         [[ -e "$file" ]] || continue  # Skip if no files
-        mv "$file" "$parent_dir/"
+         if ln "$file" "$parent_dir/" 2>/dev/null; then
+            rm "$file"
+        else
+            mv "$file" "$parent_dir/" 2>/dev/null
+        fi
         ((file_count++))
     done
 
