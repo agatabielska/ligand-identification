@@ -7,7 +7,6 @@ from typing import Callable, Optional, Tuple, Dict, List
 from sklearn.model_selection import train_test_split
 import json
 
-
 class NPZDataset(Dataset):
     """
     Dataset for loading NPZ files with labels from folder structure.
@@ -320,15 +319,23 @@ class NPZDataLoader:
     
     def get_train_loader(self, shuffle: bool = True) -> DataLoader:
         """Get training DataLoader."""
-        return DataLoader(
-            self.train_dataset,
-            batch_size=self.batch_size,
-            shuffle=shuffle,
-            num_workers=self.num_workers,
-            pin_memory=True,
-            sampler = self.sampler
-        )
-    
+        if self.sampler is not None:
+            return DataLoader(
+                self.train_dataset,
+                batch_size=self.batch_size,
+                shuffle=False,
+                num_workers=self.num_workers,
+                pin_memory=True,
+                sampler=self.sampler
+            )
+        else:
+            return DataLoader(
+                self.train_dataset,
+                batch_size=self.batch_size,
+                shuffle=shuffle,
+                num_workers=self.num_workers,
+                pin_memory=True
+            )
     def get_val_loader(self, shuffle: bool = False) -> DataLoader:
         """Get validation DataLoader."""
         return DataLoader(

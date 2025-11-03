@@ -4,6 +4,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from pipeline.pipeline import Pipeline
 from pipeline.data_loader import NPZDataLoader
+from pipeline.samplers import StochasticSampler
 from models.clifford.model import CliffordSteerableNetwork
 from utils.sampling_strategies import ProbabilisticSelectionTransform
 import numpy as np
@@ -37,7 +38,15 @@ if __name__ == "__main__":
         num_workers=4,
         cache_data=False  # Set True if you have enough RAM
     )
-    
+
+    sampler = StochasticSampler(
+        data_source=data_loader.train_dataset,
+        num_samples=512,
+        random_seed=42,
+        replacement=True
+    )
+    data_loader.sampler = sampler
+
     # Setup: 3D Euclidean space -> Cl(3,0)
     p, q = 3, 0
     
@@ -69,9 +78,9 @@ if __name__ == "__main__":
         early_stopping_patience=10,
         checkpoint_path='../../data/checkpoints/best_model.pth'
     )
-    
+
     model.save('../../data/final_model.pth')
-    
+
     # Evaluate on test set
     print("\n" + "=" * 70)
     print("Evaluating on test set...")
