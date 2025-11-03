@@ -176,6 +176,10 @@ class NPZDataLoader:
         self._scan_directory()
         self._create_splits()
         
+        # Initialize sampler with data source
+        if self.sampler is not None:
+            self.sampler.set_data_source(self.train_dataset)
+        
     def _scan_directory(self):
         """Scan directory structure and collect files with labels."""
         if self.logging:

@@ -26,6 +26,14 @@ if __name__ == "__main__":
         return points.astype(np.float32)
     
     # Create dataloader with point cloud preprocessing
+    batch_size = 16
+    
+    sampler = StochasticSampler(
+        num_samples=batch_size * 1000,  # Number of samples per epoch
+        random_seed=42,
+        replacement=True
+    )
+    
     data_loader = NPZDataLoader(
         root_dir="../../data/cryoem_blobs",  # Change this to your data directory
         preprocess_fn=preprocess,
@@ -34,18 +42,11 @@ if __name__ == "__main__":
         val_split=0.15,
         test_split=0.15,
         random_seed=42,
-        batch_size=16,
+        batch_size=batch_size,
         num_workers=4,
-        cache_data=False  # Set True if you have enough RAM
+        cache_data=False,  # Set True if you have enough RAM
+        sampler=sampler
     )
-
-    sampler = StochasticSampler(
-        data_source=data_loader.train_dataset,
-        num_samples=512,
-        random_seed=42,
-        replacement=True
-    )
-    data_loader.sampler = sampler
 
     # Setup: 3D Euclidean space -> Cl(3,0)
     p, q = 3, 0
