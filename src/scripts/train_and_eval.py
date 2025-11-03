@@ -26,7 +26,7 @@ if __name__ == "__main__":
     
     # Create dataloader with point cloud preprocessing
     data_loader = NPZDataLoader(
-        root_dir="../../data/cryoem_blobs/grouped_blobs",  # Change this to your data directory
+        root_dir="../../data/cryoem_blobs",  # Change this to your data directory
         preprocess_fn=preprocess,
         npz_key=None,  # Use first key in NPZ file
         train_split=0.7,
@@ -45,10 +45,11 @@ if __name__ == "__main__":
         p=p, q=q,
         in_channels=3,
         hidden_channels=[32, 64, 128], # Size of the last hidden layer determines the classifier input size
-        out_channels=569,  # Number of ligand classes
+        out_channels=233,  # Number of ligand classes
         n_shells=3,
         kernel_size=3,
-        learning_rate=1e-3
+        learning_rate=1e-3,
+        save_every_epoch=10
     )
     
     # Show model summary
@@ -63,11 +64,13 @@ if __name__ == "__main__":
     print("=" * 70)
     
     pipeline.fit(
-        epochs=50,
+        epochs=100,
         verbose=True,
         early_stopping_patience=10,
-        checkpoint_path='best_model.pth'
+        checkpoint_path='../../data/checkpoints/best_model.pth'
     )
+    
+    model.save('../../data/final_model.pth')
     
     # Evaluate on test set
     print("\n" + "=" * 70)
