@@ -235,6 +235,23 @@ class NPZDataLoader:
         """Create train/val/test splits."""
         if self.logging:
             print(f"\nCreating splits (train={self.train_split}, val={self.val_split}, test={self.test_split})...")
+            
+        small_classes = []
+        for label in range(self.num_classes):
+            count = np.sum(self.all_labels == label)
+            if count < 3:
+                small_classes.append((self.label_to_name[label], count))
+        
+        # Remove small classes from dataset and add them to train set only
+        if len(small_classes) > 0:
+            print("\nWarning: The following classes have less than 3 samples and will be included only in the training set:")
+            for class_name, count in small_classes:
+                print(f"  Class '{class_name}': {count} samples")
+            mask = np.isin(self.all_labels, [self.name_to_label[name] for name, _ in small_classes], invert=True)
+            small_class_files = self.all_file_paths[~mask]
+            small_class_labels = self.all_labels[~mask]
+            self.all_file_paths = self.all_file_paths[mask]
+            self.all_labels = self.all_labels[mask]
         
         # First split: test vs (train+val)
         train_val_files, test_files, train_val_labels, test_labels = train_test_split(
@@ -254,6 +271,11 @@ class NPZDataLoader:
             random_state=self.random_seed,
             stratify=train_val_labels
         )
+        
+        # Add small classes to training set
+        if len(small_classes) > 0:
+            train_files = np.concatenate([train_files, small_class_files])
+            train_labels = np.concatenate([train_labels, small_class_labels])
         
         # Create datasets
         self.train_dataset = NPZDataset(

@@ -384,7 +384,8 @@ class CliffordSteerableNetwork(nn.Module):
         kernel_size: int = 3,
         learning_rate: float = 1e-3,
         weight_decay: float = 1e-5,
-        device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
+        save_every_epoch=5
     ):
         super().__init__()
         
@@ -392,6 +393,7 @@ class CliffordSteerableNetwork(nn.Module):
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
         self.out_channels = out_channels
+        self.save_every_epoch = save_every_epoch
         
         # Build learnable steerable layers
         layers = []
@@ -490,6 +492,10 @@ class CliffordSteerableNetwork(nn.Module):
         
         # Training loop
         for epoch in range(epochs):
+            # Save checkpoint every N epochs
+            if checkpoint_path is not None and epoch % self.save_every_epoch == 0:
+                self.save(f"{"/".join(checkpoint_path.split('/')[:-1])}/checkpoint_epoch_{epoch+1}.pth")
+            
             # Training phase
             train_loss, train_acc, train_top_10 = self._train_epoch(
                 train_loader, optimizer, criterion

@@ -219,14 +219,22 @@ ERRORS=0
 UNMATCHED=0
 DUPLICATES=0
 
+if command -v parallel &> /dev/null; then
+    # Use GNU parallel if available (faster with progress bar)
+    echo "Using GNU parallel with $MAX_WORKERS workers..."
 
+    printf '%s\n' "${NPZ_FILES[@]}" | \
+        parallel -j "$MAX_WORKERS" --bar organize_file {} > /tmp/organize_results_xray.txt
+else
     # Fallback to xargs
     echo "Using xargs with $MAX_WORKERS workers..."
     echo -e "${YELLOW}Tip: Install GNU parallel for progress tracking: sudo apt-get install parallel${NC}"
 
     printf '%s\n' "${NPZ_FILES[@]}" | \
         xargs -P "$MAX_WORKERS" -I {} bash -c 'organize_file "$@"' _ {} > /tmp/organize_results_xray.txt
+fi
 
+wait
 
 # Process results
 > /tmp/unmatched_files_xray.log
