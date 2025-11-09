@@ -1,16 +1,19 @@
-#!/bin/bash
+#!/usr/bin/bash
 
-# Ligand File Organizer by Cluster (Optimized)
-# Organizes .npz files into folders based on ligand_mapping.csv
-
+# CryoEM Ligand File Organizer
+# Organizes .npz files into folders based on xray training groups
+# Uses ligand_mapping.csv for ligand to group matching
+# Moves unmatched files to RARE_LIGAND folder
 
 # Get script directory
 SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/"
 
 # Configuration
-MAPPING_CSV="${SCRIPT_DIR}../../data/ligand_mapping.csv"
-REQUIRED_LIGANDS="${SCRIPT_DIR}../../data/required_ligands_cryoem.txt"
-SOURCE_DIR="${SCRIPT_DIR}../../data/cryoem_blobs"
+DATA_DIR="${SCRIPT_DIR}../../data"
+XRAY_TRAIN_DIR="${DATA_DIR}/xray_blobs/xray_train"
+CRYOEM_DIR="${DATA_DIR}/cryoem_blobs"
+XRAY_GROUPS_FILE="${DATA_DIR}/xray_groups.txt"
+LIGAND_MAPPING_CSV="${DATA_DIR}/ligand_mapping.csv"
 MAX_WORKERS="${1:-16}"  # Default 16 workers, can override with first argument
 
 # Colors for output
@@ -21,7 +24,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 echo "=========================================="
-echo "Ligand File Organizer by Cluster"
+echo "CryoEM Ligand File Organizer"
 echo "=========================================="
 echo "Script directory: $SCRIPT_DIR"
 
@@ -29,239 +32,283 @@ echo "Script directory: $SCRIPT_DIR"
 cd "$SCRIPT_DIR"
 
 # Validate inputs
-if [[ ! -f "$MAPPING_CSV" ]]; then
-    echo -e "${RED}❌ Error: Mapping CSV not found: $MAPPING_CSV${NC}"
+if [[ ! -d "$XRAY_TRAIN_DIR" ]]; then
+    echo -e "${RED}✖ Error: X-ray training directory not found: $XRAY_TRAIN_DIR${NC}"
     exit 1
 fi
 
-if [[ ! -d "$SOURCE_DIR" ]]; then
-    echo -e "${RED}❌ Error: Source directory not found: $SOURCE_DIR${NC}"
+if [[ ! -d "$CRYOEM_DIR" ]]; then
+    echo -e "${RED}✖ Error: CryoEM directory not found: $CRYOEM_DIR${NC}"
     exit 1
 fi
 
-echo -e "\n${BLUE}[1/5] Scanning .npz files...${NC}"
+if [[ ! -f "$LIGAND_MAPPING_CSV" ]]; then
+    echo -e "${RED}✖ Error: Ligand mapping CSV not found: $LIGAND_MAPPING_CSV${NC}"
+    exit 1
+fi
 
-# Find all .npz files FIRST (before loading CSV)
-mapfile -t NPZ_FILES < <(find "$SOURCE_DIR" -maxdepth 1 -type f -name "*.npz")
+echo -e "\n${BLUE}[Step 1/6] Extracting group names from xray_train...${NC}"
+
+# Get all folder names from xray_train directory
+find "$XRAY_TRAIN_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort > "$XRAY_GROUPS_FILE"
+
+GROUP_COUNT=$(wc -l < "$XRAY_GROUPS_FILE")
+echo "Extracted $GROUP_COUNT group names from xray_train"
+echo "Saved to: $(realpath "$XRAY_GROUPS_FILE")"
+
+if [[ $GROUP_COUNT -eq 0 ]]; then
+    echo -e "${RED}✖ Error: No groups found in xray_train directory${NC}"
+    exit 1
+fi
+
+echo -e "\n${BLUE}[Step 2/6] Creating group folders in cryoem_blobs...${NC}"
+
+FOLDERS_CREATED=0
+FOLDERS_EXISTING=0
+
+while IFS= read -r group; do
+    if [[ -z "$group" ]]; then
+        continue
+    fi
+
+    if [[ -d "$CRYOEM_DIR/$group" ]]; then
+        ((FOLDERS_EXISTING++))
+    else
+        mkdir -p "$CRYOEM_DIR/$group"
+        ((FOLDERS_CREATED++))
+    fi
+done < "$XRAY_GROUPS_FILE"
+
+# Also create RARE_LIGAND folder
+if [[ -d "$CRYOEM_DIR/RARE_LIGAND" ]]; then
+    echo "RARE_LIGAND folder already exists"
+else
+    mkdir -p "$CRYOEM_DIR/RARE_LIGAND"
+    echo -e "${GREEN}✓ Created RARE_LIGAND folder${NC}"
+fi
+
+echo "Group folders status:"
+echo "  - Already existing: $FOLDERS_EXISTING"
+echo "  - Newly created: $FOLDERS_CREATED"
+echo "  - Total: $GROUP_COUNT"
+
+echo -e "\n${BLUE}[Step 3/6] Loading ligand mapping from CSV...${NC}"
+
+# Build ligand -> group mapping from ligand_mapping.csv
+# Column 2 = ligand name, Column 3 = group name
+TEMP_LIGAND_MAP=$(mktemp)
+
+awk -F',' '
+NR == 1 { next }  # Skip header
+{
+    ligand = $2
+    group = $3
+    # Trim whitespace and quotes
+    gsub(/^[ \t\r\n"]+|[ \t\r\n"]+$/, "", ligand)
+    gsub(/^[ \t\r\n"]+|[ \t\r\n"]+$/, "", group)
+    if (ligand != "" && group != "") {
+        print ligand ":" group
+    }
+}' "$LIGAND_MAPPING_CSV" > "$TEMP_LIGAND_MAP"
+
+MAPPING_COUNT=$(wc -l < "$TEMP_LIGAND_MAP")
+echo "Loaded $MAPPING_COUNT ligand-to-group mappings from CSV"
+echo "Sample mappings (first 5):"
+head -n 5 "$TEMP_LIGAND_MAP" | sed 's/^/  /'
+
+# Copy mapping to /tmp for access in parallel processes
+cp "$TEMP_LIGAND_MAP" /tmp/cryoem_ligand_map.txt
+
+# Also copy group list to /tmp for validation
+cp "$XRAY_GROUPS_FILE" /tmp/cryoem_valid_groups.txt
+
+echo -e "\n${BLUE}[Step 4/6] Finding and organizing .npz files...${NC}"
+
+# Find all .npz files in root cryoem_blobs directory
+mapfile -t NPZ_FILES < <(find "$CRYOEM_DIR" -maxdepth 1 -type f -name "*.npz")
 TOTAL_FILES=${#NPZ_FILES[@]}
-
-if [[ $TOTAL_FILES -eq 0 ]]; then
-    echo -e "${YELLOW}⚠ No .npz files found to organize${NC}"
-    exit 0
-fi
 
 echo "Found $TOTAL_FILES .npz files to organize"
 
-echo -e "\n${BLUE}[2/5] Extracting required ligands from filenames...${NC}"
+if [[ $TOTAL_FILES -eq 0 ]]; then
+    echo -e "${YELLOW}⚠ No files to organize${NC}"
 
-# Check if required_ligands_cryoem.txt exists
-if [[ -f "$REQUIRED_LIGANDS" ]]; then
-    echo "Loading required ligands from $REQUIRED_LIGANDS"
-    UNIQUE_LIGANDS=$(wc -l < "$REQUIRED_LIGANDS")
-    echo "Loaded $UNIQUE_LIGANDS unique ligands"
+    # Still proceed to cleanup empty folders even if no files to move
+    MOVED=0
+    DUPLICATES=0
+    ERRORS=0
+    UNMATCHED=0
+    NO_FOLDER=0
+    RARE_MOVED=0
+    RARE_DUPLICATES=0
 else
-    # Extract unique ligands from filenames using parallel processing
-    extract_ligand() {
-        local file="$1"
-        local filename=$(basename "$file")
-        local ligand="${filename%.npz}"
-        ligand="${ligand##*_}"
-        echo "$ligand"
-    }
-
-    export -f extract_ligand
-
-    echo "Using xargs with $MAX_WORKERS workers for extraction..."
-    printf '%s\n' "${NPZ_FILES[@]}" | \
-        xargs -P "$MAX_WORKERS" -I {} bash -c 'extract_ligand "$@"' _ {} | \
-        sort -u > "$REQUIRED_LIGANDS"
-
-    UNIQUE_LIGANDS=$(wc -l < "$REQUIRED_LIGANDS")
-    echo "Identified $UNIQUE_LIGANDS unique ligands to lookup"
-    echo "Saved to $REQUIRED_LIGANDS for future runs"
-fi
-
-echo -e "\n${BLUE}[3/5] Loading relevant mappings from CSV...${NC}"
-
-# Use awk to filter CSV for only required ligands (much faster than bash loops)
-# This loads only needed rows instead of all 30k entries
-awk -F',' 'NR==1 {next}  # Skip header
-FNR==NR {ligands[$1]=1; next}  # Build lookup table from required_ligands_cryoem.txt
-{
-    ligand=$2
-    gsub(/^[ \t\r\n"]+|[ \t\r\n"]+$/, "", ligand)  # Trim whitespace and quotes
-    if (ligand in ligands) {
-        folder=$3
-        gsub(/^[ \t\r\n"]+|[ \t\r\n"]+$/, "", folder)  # Trim whitespace and quotes
-        print ligand ":" folder
-    }
-}' "$REQUIRED_LIGANDS" "$MAPPING_CSV" > /tmp/ligand_mapping_cryoem.txt
-
-# Load filtered mapping into associative array
-declare -A LIGAND_TO_FOLDER
-while IFS=':' read -r ligand folder; do
-    LIGAND_TO_FOLDER["$ligand"]="$folder"
-done < /tmp/ligand_mapping_cryoem.txt
-
-MAPPING_COUNT=${#LIGAND_TO_FOLDER[@]}
-echo "Loaded $MAPPING_COUNT ligand-to-folder mappings (filtered from CSV)"
-
-if [[ $MAPPING_COUNT -eq 0 ]]; then
-    echo -e "${RED}❌ Error: No matching ligands found in CSV${NC}"
-    exit 1
-fi
-
-echo -e "\n${BLUE}[4/5] Creating cluster folders...${NC}"
-
-# Get unique folders from filtered mapping
-declare -A UNIQUE_FOLDERS_MAP
-for folder in "${LIGAND_TO_FOLDER[@]}"; do
-    UNIQUE_FOLDERS_MAP["$folder"]=1
-done
-
-for folder in "${!UNIQUE_FOLDERS_MAP[@]}"; do
-    if [[ -n "$folder" ]]; then
-        # Sanitize folder name
-        safe_folder=$(echo "$folder" | tr '/' '_' | tr '\\' '_')
-        mkdir -p "$SOURCE_DIR/$safe_folder"
-    fi
-done
-
-echo "Created ${#UNIQUE_FOLDERS_MAP[@]} cluster folders"
-
-echo -e "\n${BLUE}[5/5] Organizing files into clusters...${NC}"
 
 # Function to organize a single file
 organize_file() {
     local file="$1"
     local filename=$(basename "$file")
 
-    # Extract ligand name (last part after underscore for cryoem)
-    local ligand="${filename%.npz}"
-    ligand="${ligand##*_}"
+    # Extract ligand name (part after last underscore before .npz)
+    # Remove .npz extension first
+    local base="${filename%.npz}"
 
-    # Look up folder from file instead of array
-    local folder=$(grep "^${ligand}:" /tmp/ligand_to_folder_map_cryoem.txt | cut -d':' -f2)
+    # Get part after last underscore
+    local ligand="${base##*_}"
 
-    if [[ -n "$folder" ]]; then
-        # Matched: use cluster folder
-        local safe_folder=$(echo "$folder" | tr '/' '_' | tr '\\' '_')
-        local dest="$SOURCE_DIR/$safe_folder/$filename"
+    # Look up group from mapping
+    local group=$(grep "^${ligand}:" /tmp/cryoem_ligand_map.txt 2>/dev/null | cut -d':' -f2)
 
-        if ln "$file" "$dest" 2>/dev/null; then
+    if [[ -z "$group" ]]; then
+        # No mapping found - will be moved to RARE_LIGAND later
+        echo "unmatched:$filename:$ligand:"
+        return
+    fi
+
+    # Check if group folder exists (is in valid groups list)
+    if grep -qx "$group" /tmp/cryoem_valid_groups.txt; then
+        local dest="$CRYOEM_DIR/$group/$filename"
+
+        # Check if file already exists at destination
+        if [[ -f "$dest" ]]; then
             rm "$file"
-            echo "linked:$filename"
+            echo "duplicate:$filename:$ligand:$group"
+            return
+        fi
+
+        if mv "$file" "$dest" 2>/dev/null; then
+            echo "moved:$filename:$ligand:$group"
         else
-            mv "$file" "$dest" 2>/dev/null && echo "moved:$filename" || echo "error:$filename"
+            echo "error:$filename:$ligand:$group"
         fi
     else
-        # Unmatched: create folder with ligand name
-        local ligand_folder="$SOURCE_DIR/$ligand"
-        mkdir -p "$ligand_folder"
-        local dest="$ligand_folder/$filename"
-
-        if ln "$file" "$dest" 2>/dev/null; then
-            rm "$file"
-            echo "ligand_linked:$filename:$ligand"
-        else
-            mv "$file" "$dest" 2>/dev/null && echo "ligand_moved:$filename:$ligand" || echo "error:$filename"
-        fi
+        # Group not in valid groups - will be moved to RARE_LIGAND later
+        echo "no_folder:$filename:$ligand:$group"
     fi
 }
 
-> /tmp/ligand_to_folder_map_cryoem.txt
-for ligand in "${!LIGAND_TO_FOLDER[@]}"; do
-    echo "$ligand:${LIGAND_TO_FOLDER[$ligand]}" >> /tmp/ligand_to_folder_map_cryoem.txt
-done
-
 export -f organize_file
-export SOURCE_DIR
+export CRYOEM_DIR
 
-# Process files in parallel
-SUCCESS=0
-LINKED=0
-MOVED=0
-LIGAND_LINKED=0
-LIGAND_MOVED=0
-ERRORS=0
-
-if command -v parallel &> /dev/null; then
-    # Use GNU parallel if available (faster with progress bar)
-    echo "Using GNU parallel with $MAX_WORKERS workers..."
-
-    printf '%s\n' "${NPZ_FILES[@]}" | \
-        parallel -j "$MAX_WORKERS" --bar organize_file {} > /tmp/organize_results_cryoem.txt
-else
-    # Fallback to xargs
-    echo "Using xargs with $MAX_WORKERS workers..."
-    echo -e "${YELLOW}Tip: Install GNU parallel for progress tracking: sudo apt-get install parallel${NC}"
-
-    printf '%s\n' "${NPZ_FILES[@]}" | \
-        xargs -P "$MAX_WORKERS" -I {} bash -c 'organize_file "$@"' _ {} > /tmp/organize_results_cryoem.txt
-fi
+# Process files in parallel with xargs
+echo "Using xargs with $MAX_WORKERS workers..."
+printf '%s\n' "${NPZ_FILES[@]}" | \
+    xargs -P "$MAX_WORKERS" -I {} bash -c 'organize_file "$@"' _ {} > /tmp/cryoem_results.txt
 
 wait
 
-# Check if any .npz files remain
-REMAINING=$(find "$SOURCE_DIR" -maxdepth 1 -type f -name "*.npz" 2>/dev/null | wc -l)
-if [[ $REMAINING -eq 0 ]]; then
-    echo "All .npz files processed"
-fi
+# Count results
+MOVED=0
+DUPLICATES=0
+ERRORS=0
+UNMATCHED=0
+NO_FOLDER=0
 
-# Process results
-> /tmp/ligand_name_folders_cryoem.log
-> /tmp/organization_errors_cryoem.log
-
-while IFS=':' read -r status filename ligand; do
+while IFS=':' read -r status filename ligand group; do
     case "$status" in
-        linked)
-            ((SUCCESS++))
-            ((LINKED++))
-            ;;
         moved)
-            ((SUCCESS++))
             ((MOVED++))
             ;;
-        ligand_linked)
-            ((SUCCESS++))
-            ((LIGAND_LINKED++))
-            echo "$filename -> $ligand/" >> /tmp/ligand_name_folders_cryoem.log
-            ;;
-        ligand_moved)
-            ((SUCCESS++))
-            ((LIGAND_MOVED++))
-            echo "$filename -> $ligand/" >> /tmp/ligand_name_folders_cryoem.log
+        duplicate)
+            ((DUPLICATES++))
             ;;
         error)
             ((ERRORS++))
-            echo "$filename" >> /tmp/organization_errors_cryoem.log
+            ;;
+        unmatched)
+            ((UNMATCHED++))
+            ;;
+        no_folder)
+            ((NO_FOLDER++))
             ;;
     esac
-done < /tmp/organize_results_cryoem.txt
+done < /tmp/cryoem_results.txt
 
+echo -e "${GREEN}✓ File organization complete${NC}"
+echo "  - Files moved to groups: $MOVED"
+echo "  - Duplicates removed: $DUPLICATES"
+echo "  - Errors: $ERRORS"
+echo "  - No mapping found: $UNMATCHED"
+echo "  - Mapping exists but no folder: $NO_FOLDER"
+
+echo -e "\n${BLUE}[Step 5/6] Moving remaining files to RARE_LIGAND...${NC}"
+
+# Find all remaining .npz files in root directory
+mapfile -t REMAINING_FILES < <(find "$CRYOEM_DIR" -maxdepth 1 -type f -name "*.npz")
+REMAINING_COUNT=${#REMAINING_FILES[@]}
+
+echo "Found $REMAINING_COUNT files remaining in root directory"
+
+if [[ $REMAINING_COUNT -gt 0 ]]; then
+    RARE_MOVED=0
+    RARE_DUPLICATES=0
+
+    for file in "${REMAINING_FILES[@]}"; do
+        filename=$(basename "$file")
+        dest="$CRYOEM_DIR/RARE_LIGAND/$filename"
+
+        if [[ -f "$dest" ]]; then
+            rm "$file"
+            ((RARE_DUPLICATES++))
+        elif mv "$file" "$dest" 2>/dev/null; then
+            ((RARE_MOVED++))
+        fi
+    done
+
+    echo -e "${GREEN}✓ Moved $RARE_MOVED files to RARE_LIGAND${NC}"
+    if [[ $RARE_DUPLICATES -gt 0 ]]; then
+        echo "  - Duplicates removed: $RARE_DUPLICATES"
+    fi
+else
+    echo "No files to move to RARE_LIGAND"
+fi
+
+fi  # End of if block for TOTAL_FILES check
+
+echo -e "\n${BLUE}[Step 6/6] Cleaning up empty folders...${NC}"
+
+EMPTY_FOLDERS=0
+
+# Check each group folder (not RARE_LIGAND)
+while IFS= read -r group; do
+    if [[ -z "$group" ]]; then
+        continue
+    fi
+
+    folder="$CRYOEM_DIR/$group"
+
+    # Check if folder exists and is empty
+    if [[ -d "$folder" ]]; then
+        file_count=$(find "$folder" -maxdepth 1 -type f -name "*.npz" | wc -l)
+
+        if [[ $file_count -eq 0 ]]; then
+            rmdir "$folder" 2>/dev/null && ((EMPTY_FOLDERS++))
+        fi
+    fi
+done < "$XRAY_GROUPS_FILE"
+
+if [[ $EMPTY_FOLDERS -gt 0 ]]; then
+    echo -e "${GREEN}✓ Removed $EMPTY_FOLDERS empty folders${NC}"
+else
+    echo "No empty folders to remove"
+fi
+
+# Final summary
 echo -e "\n=========================================="
-echo -e "${GREEN}✓ Successfully organized $SUCCESS files${NC}"
-echo "  - Cluster folders (hard linked): $LINKED"
-echo "  - Cluster folders (moved): $MOVED"
-echo "  - Ligand name folders (hard linked): $LIGAND_LINKED"
-echo "  - Ligand name folders (moved): $LIGAND_MOVED"
-
-if [[ $ERRORS -gt 0 ]]; then
-    echo -e "\n${YELLOW}⚠ Encountered $ERRORS errors${NC}"
-    echo "  Error details saved to: /tmp/organization_errors_cryoem.log"
-fi
-
-if [[ $((LIGAND_LINKED + LIGAND_MOVED)) -gt 0 ]]; then
-    echo -e "\n${BLUE}ℹ $((LIGAND_LINKED + LIGAND_MOVED)) files organized into ligand name folders${NC}"
-    echo "  Details saved to: /tmp/ligand_name_folders_cryoem.log"
-fi
-
-echo -e "\n${GREEN}✓ Organization complete!${NC}"
-echo "  Source directory: $(realpath "$SOURCE_DIR")"
-echo "  Memory optimization: Loaded only $MAPPING_COUNT/$((30000)) CSV entries"
+echo -e "${GREEN}✓ CryoEM organization complete!${NC}"
+echo ""
+echo "Statistics:"
+echo "  - Files organized into groups: $MOVED"
+echo "  - Files moved to RARE_LIGAND: $RARE_MOVED"
+echo "  - Duplicates removed: $((DUPLICATES + RARE_DUPLICATES))"
+echo "  - Errors: $ERRORS"
+echo "  - Empty folders removed: $EMPTY_FOLDERS"
+echo ""
+echo "Location: $(realpath "$CRYOEM_DIR")"
 echo "=========================================="
 
 # Cleanup
-rm -f /tmp/organize_results_cryoem.txt /tmp/ligand_mapping_cryoem.txt /tmp/ligand_to_folder_map_cryoem.txt
+rm -f "$TEMP_LIGAND_MAP"
+rm -f /tmp/cryoem_ligand_map.txt /tmp/cryoem_valid_groups.txt
+rm -f /tmp/cryoem_results.txt
 
 exit 0
