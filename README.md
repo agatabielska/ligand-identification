@@ -14,7 +14,7 @@ uv run streamlit run src/visualizations/blob_visualization.py
 ```
 
 # To prepare data for the model
-### Download ligand groups mapping
+### Download ligand groups mapping, xray training and holdout mapping
 ```bash
 ./src/scripts/download_ligand_mapping.sh
 ```
@@ -28,7 +28,7 @@ X-ray:
 ./src/scripts/download_xray_blobs.sh
 ```
 ### Group blobs into classes
-CryoEM:
+CryoEM: TO-DO decision how to group them needed
 ```bash
 ./src/scripts/group_cryoem_blobs.sh
 ```
@@ -36,17 +36,4 @@ X-ray:
 ```bash
 ./src/scripts/group_xray_blobs.sh
 ```
-### Filter out small classes
-Find frequent ligand groups (>=100 samples):
-```bash
-./src/scripts/get_frequent_groups.sh
-```
-Then filter out small classes:
-CryoEM:
-```bash
-./src/scripts/filter_cryoem_groups.sh
-```
-X-ray:
-```bash
-./src/scripts/filter_xray_groups.sh
-```
+

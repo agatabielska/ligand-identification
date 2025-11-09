@@ -1,17 +1,15 @@
 #!/usr/bin/bash
 
-# Ligand File Organizer by Cluster (Optimized)
-# Organizes .npz files into folders based on ligand_mapping.csv
-# Creates individual folders for unmatched ligands
-
-
+# Ligand File Organizer by Cluster (Updated)
+# Creates train/holdout folder structure based on CSV files
+# Organizes .npz files into folders based on ligand groups
 
 # Get script directory
 SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/"
 
 # Configuration
-MAPPING_CSV="${SCRIPT_DIR}../../data/ligand_mapping.csv"
-REQUIRED_LIGANDS="${SCRIPT_DIR}../../data/required_ligands_xray.txt"
+TRAIN_CSV="${SCRIPT_DIR}../../data/xray_train.csv"
+HOLDOUT_CSV="${SCRIPT_DIR}../../data/xray_holdout.csv"
 SOURCE_DIR="${SCRIPT_DIR}../../data/xray_blobs"
 MAX_WORKERS="${1:-16}"  # Default 16 workers, can override with first argument
 
@@ -23,7 +21,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 echo "=========================================="
-echo "Ligand File Organizer by Cluster"
+echo "X-ray Ligand Folder Structure Setup"
 echo "=========================================="
 echo "Script directory: $SCRIPT_DIR"
 
@@ -31,274 +29,345 @@ echo "Script directory: $SCRIPT_DIR"
 cd "$SCRIPT_DIR"
 
 # Validate inputs
-if [[ ! -f "$MAPPING_CSV" ]]; then
-    echo -e "${RED}❌ Error: Mapping CSV not found: $MAPPING_CSV${NC}"
-    exit 1
-fi
-
 if [[ ! -d "$SOURCE_DIR" ]]; then
-    echo -e "${RED}❌ Error: Source directory not found: $SOURCE_DIR${NC}"
+    echo -e "${RED}✖ Error: Source directory not found: $SOURCE_DIR${NC}"
     exit 1
 fi
 
-echo -e "\n${BLUE}[1/5] Scanning .npz files...${NC}"
-
-# Find all .npz files FIRST (before loading CSV)
-mapfile -t NPZ_FILES < <(find "$SOURCE_DIR" -maxdepth 1 -type f -name "*.npz")
-TOTAL_FILES=${#NPZ_FILES[@]}
-
-if [[ $TOTAL_FILES -eq 0 ]]; then
-    echo -e "${YELLOW}⚠ No .npz files found to organize${NC}"
-    exit 0
+if [[ ! -f "$TRAIN_CSV" ]]; then
+    echo -e "${RED}✖ Error: Training CSV not found: $TRAIN_CSV${NC}"
+    exit 1
 fi
 
-echo "Found $TOTAL_FILES .npz files to organize"
+if [[ ! -f "$HOLDOUT_CSV" ]]; then
+    echo -e "${RED}✖ Error: Holdout CSV not found: $HOLDOUT_CSV${NC}"
+    exit 1
+fi
 
-echo -e "\n${BLUE}[2/5] Extracting required ligands from filenames...${NC}"
+echo -e "\n${BLUE}[Step 1/3] Creating main directories...${NC}"
 
-# Check if required_ligands_xray.txt exists
-if [[ -f "$REQUIRED_LIGANDS" ]]; then
-    echo "Loading required ligands from $REQUIRED_LIGANDS"
+# Create xray_train and xray_holdout directories
+TRAIN_DIR="${SOURCE_DIR}/xray_train"
+HOLDOUT_DIR="${SOURCE_DIR}/xray_holdout"
+
+if [[ -d "$TRAIN_DIR" ]]; then
+    echo "  xray_train/ - already exists"
 else
-    # Extract unique ligands from filenames using parallel processing
-    TEMP_LIGANDS=$(mktemp)
-
-    extract_ligand() {
-        local file="$1"
-        local filename=$(basename "$file")
-        local ligand="${filename%.npz}"
-        IFS='_' read -r first second rest <<< "$ligand"
-        echo "$second"
-    }
-
-    export -f extract_ligand
-
-
-        echo "Using xargs for extraction..."
-        printf '%s\n' "${NPZ_FILES[@]}" | \
-            xargs -P "$MAX_WORKERS" -I {} bash -c 'extract_ligand "$@"' _ {} | \
-            sort -u > "$TEMP_LIGANDS"
-
-
-    cp "$TEMP_LIGANDS" "$REQUIRED_LIGANDS"
-    UNIQUE_LIGANDS=$(wc -l < "$REQUIRED_LIGANDS")
-    rm -f "$TEMP_LIGANDS"
-
-    echo "Identified $UNIQUE_LIGANDS unique ligands to lookup"
+    mkdir -p "$TRAIN_DIR"
+    echo -e "  ${GREEN}✓ Created xray_train/${NC}"
 fi
-echo -e "\n${BLUE}[3/5] Loading relevant mappings from CSV...${NC}"
 
-# Use awk to filter CSV for only required ligands (much faster than bash loops)
-# This loads only needed rows instead of all 30k entries
+if [[ -d "$HOLDOUT_DIR" ]]; then
+    echo "  xray_holdout/ - already exists"
+else
+    mkdir -p "$HOLDOUT_DIR"
+    echo -e "  ${GREEN}✓ Created xray_holdout/${NC}"
+fi
+
+echo -e "\n${BLUE}[Step 2/3] Extracting unique ligand groups from xray_train.csv...${NC}"
+
+# Extract unique ligand groups from training CSV (skip header, get 2nd column)
+TEMP_LIGANDS=$(mktemp)
+
 awk -F',' '
-BEGIN {
-    # Read required ligands file first
-    while ((getline line < "'"$REQUIRED_LIGANDS"'") > 0) {
-        ligands[line] = 1
-    }
-    close("'"$REQUIRED_LIGANDS"'")
-}
-NR == 1 { next }  # Skip CSV header
+NR == 1 { next }  # Skip header
 {
     ligand = $2
-    gsub(/^[ \t\r\n"]+|[ \t\r\n"]+$/, "", ligand)  # Trim whitespace and quotes
-    if (ligand in ligands) {
-        folder = $3
-        gsub(/^[ \t\r\n"]+|[ \t\r\n"]+$/, "", folder)  # Trim whitespace and quotes
-        print ligand ":" folder
+    # Trim whitespace and quotes
+    gsub(/^[ \t\r\n"]+|[ \t\r\n"]+$/, "", ligand)
+    if (ligand != "") {
+        print ligand
     }
-}' "$MAPPING_CSV" > /tmp/ligand_mapping_xray.txt
+}' "$TRAIN_CSV" | sort -u > "$TEMP_LIGANDS"
 
-# Load filtered mapping into associative array
-declare -A LIGAND_TO_FOLDER
-while IFS=':' read -r ligand folder; do
-    LIGAND_TO_FOLDER["$ligand"]="$folder"
-done < /tmp/ligand_mapping_xray.txt
+UNIQUE_GROUPS=$(wc -l < "$TEMP_LIGANDS")
+echo "Found $UNIQUE_GROUPS unique ligand groups"
 
-MAPPING_COUNT=${#LIGAND_TO_FOLDER[@]}
-echo "Loaded $MAPPING_COUNT ligand-to-folder mappings (filtered from CSV)"
+echo -e "\n${BLUE}[Step 3/3] Creating ligand group folders...${NC}"
 
-echo -e "\n${BLUE}[4/5] Creating cluster folders...${NC}"
+TRAIN_CREATED=0
+TRAIN_EXISTS=0
+HOLDOUT_CREATED=0
+HOLDOUT_EXISTS=0
 
-# Get unique folders from filtered mapping
-declare -A UNIQUE_FOLDERS_MAP
-for folder in "${LIGAND_TO_FOLDER[@]}"; do
-    UNIQUE_FOLDERS_MAP["$folder"]=1
-done
-
-for folder in "${!UNIQUE_FOLDERS_MAP[@]}"; do
-    if [[ -n "$folder" ]]; then
-        # Sanitize folder name
-        safe_folder=$(echo "$folder" | tr '/' '_' | tr '\\' '_')
-        mkdir -p "$SOURCE_DIR/$safe_folder"
+while IFS= read -r group; do
+    if [[ -z "$group" ]]; then
+        continue
     fi
-done
 
-echo "Created ${#UNIQUE_FOLDERS_MAP[@]} cluster folders"
+    # Sanitize folder name (replace problematic characters)
+    safe_group=$(echo "$group" | tr '/' '_' | tr '\\' '_')
 
-echo -e "\n${BLUE}[5/5] Organizing files into clusters...${NC}"
+    # Create in xray_train
+    if [[ -d "$TRAIN_DIR/$safe_group" ]]; then
+        ((TRAIN_EXISTS++))
+    else
+        mkdir -p "$TRAIN_DIR/$safe_group"
+        ((TRAIN_CREATED++))
+    fi
 
-# RE-SCAN for files that still exist in root directory
-echo "Re-scanning for remaining .npz files in root directory..."
-mapfile -t NPZ_FILES < <(find "$SOURCE_DIR" -maxdepth 1 -type f -name "*.npz")
-REMAINING_FILES=${#NPZ_FILES[@]}
+    # Create in xray_holdout
+    if [[ -d "$HOLDOUT_DIR/$safe_group" ]]; then
+        ((HOLDOUT_EXISTS++))
+    else
+        mkdir -p "$HOLDOUT_DIR/$safe_group"
+        ((HOLDOUT_CREATED++))
+    fi
 
-if [[ $REMAINING_FILES -eq 0 ]]; then
-    echo -e "${GREEN}✓ No files to organize - all files already in correct folders!${NC}"
+done < "$TEMP_LIGANDS"
+
+# Cleanup
+rm -f "$TEMP_LIGANDS"
+
+echo -e "\n=========================================="
+echo -e "${GREEN}✓ Folder structure setup complete!${NC}"
+echo ""
+echo "xray_train/ folders:"
+echo "  - Already existing: $TRAIN_EXISTS"
+echo "  - Newly created: $TRAIN_CREATED"
+echo "  - Total: $UNIQUE_GROUPS"
+echo ""
+echo "xray_holdout/ folders:"
+echo "  - Already existing: $HOLDOUT_EXISTS"
+echo "  - Newly created: $HOLDOUT_CREATED"
+echo "  - Total: $UNIQUE_GROUPS"
+echo ""
+echo "Directory structure:"
+echo "  $(realpath "$SOURCE_DIR")"
+echo "  ├── xray_train/"
+echo "  │   └── [${UNIQUE_GROUPS} ligand group folders]"
+echo "  └── xray_holdout/"
+echo "      └── [${UNIQUE_GROUPS} ligand group folders]"
+echo "=========================================="
+
+# ============================================================
+# PART 2: Move files to appropriate folders
+# ============================================================
+
+echo -e "\n${BLUE}[Step 4/6] Finding .npz files in root directory...${NC}"
+
+# Find all .npz files in root directory only (not in subdirectories)
+mapfile -t ROOT_FILES < <(find "$SOURCE_DIR" -maxdepth 1 -type f -name "*.npz")
+TOTAL_ROOT_FILES=${#ROOT_FILES[@]}
+
+echo "Found $TOTAL_ROOT_FILES .npz files in root directory"
+
+if [[ $TOTAL_ROOT_FILES -eq 0 ]]; then
+    echo -e "${GREEN}✓ No files to organize (all files already in folders)${NC}"
     echo "=========================================="
     exit 0
 fi
 
-echo "Found $REMAINING_FILES files remaining to organize (down from $TOTAL_FILES)"
+echo -e "\n${BLUE}[Step 5/6] Processing training set files...${NC}"
 
-# Function to organize a single file
-organize_file() {
+# Build filename -> ligand group mapping from xray_train.csv
+TEMP_TRAIN_MAP=$(mktemp)
+
+awk -F',' '
+NR == 1 { next }  # Skip header
+{
+    filename = $1
+    ligand = $2
+    # Trim whitespace and quotes
+    gsub(/^[ \t\r\n"]+|[ \t\r\n"]+$/, "", filename)
+    gsub(/^[ \t\r\n"]+|[ \t\r\n"]+$/, "", ligand)
+    if (filename != "" && ligand != "") {
+        print filename ":" ligand
+    }
+}' "$TRAIN_CSV" > "$TEMP_TRAIN_MAP"
+
+TRAIN_MAPPINGS=$(wc -l < "$TEMP_TRAIN_MAP")
+echo "Loaded $TRAIN_MAPPINGS filename mappings from xray_train.csv"
+
+# Function to move file to training folder
+move_to_train() {
     local file="$1"
     local filename=$(basename "$file")
 
-    # Extract ligand name (second element when split by '_')
-    local ligand="${filename%.npz}"
-    IFS='_' read -r first second rest <<< "$ligand"
-    ligand="$second"
+    # Look up ligand group from mapping
+    local ligand=$(grep "^${filename}:" /tmp/train_map_xray.txt 2>/dev/null | cut -d':' -f2)
 
-    # Look up folder from file instead of array
-    local folder=$(grep "^${ligand}:" /tmp/ligand_to_folder_map_xray.txt 2>/dev/null | cut -d':' -f2)
-
-    if [[ -n "$folder" ]]; then
-        local safe_folder=$(echo "$folder" | tr '/' '_' | tr '\\' '_')
-        local dest="$SOURCE_DIR/$safe_folder/$filename"
-
-        # Check if file already exists at destination
-        if [[ -f "$dest" ]]; then
-            rm "$file"
-            echo "duplicate_removed:$filename"
-            return
-        fi
-
-        if ln "$file" "$dest" 2>/dev/null; then
-            rm "$file"
-            echo "linked:$filename"
-        else
-            mv "$file" "$dest" 2>/dev/null && echo "moved:$filename" || echo "error:$filename"
-        fi
-    else
-        # Create individual folder for unmatched ligand
+    if [[ -n "$ligand" ]]; then
         local safe_ligand=$(echo "$ligand" | tr '/' '_' | tr '\\' '_')
-        mkdir -p "$SOURCE_DIR/$safe_ligand"
-        local dest="$SOURCE_DIR/$safe_ligand/$filename"
+        local dest="${SOURCE_DIR}/xray_train/${safe_ligand}/${filename}"
 
         # Check if file already exists at destination
         if [[ -f "$dest" ]]; then
             rm "$file"
-            echo "duplicate_removed:$filename:$ligand"
+            echo "train_duplicate:$filename:$ligand"
             return
         fi
 
-        if ln "$file" "$dest" 2>/dev/null; then
-            rm "$file"
-            echo "unmatched_linked:$filename:$ligand"
+        if mv "$file" "$dest" 2>/dev/null; then
+            echo "train_moved:$filename:$ligand"
         else
-            mv "$file" "$dest" 2>/dev/null && echo "unmatched_moved:$filename:$ligand" || echo "error:$filename"
+            echo "train_error:$filename:$ligand"
         fi
     fi
 }
 
-> /tmp/ligand_to_folder_map_xray.txt
-for ligand in "${!LIGAND_TO_FOLDER[@]}"; do
-    echo "$ligand:${LIGAND_TO_FOLDER[$ligand]}" >> /tmp/ligand_to_folder_map_xray.txt
-done
-
-export -f organize_file
+export -f move_to_train
 export SOURCE_DIR
 
-# Process files in parallel
-SUCCESS=0
-LINKED=0
-MOVED=0
-ERRORS=0
-UNMATCHED=0
-DUPLICATES=0
+# Copy mapping to /tmp for access in parallel processes
+cp "$TEMP_TRAIN_MAP" /tmp/train_map_xray.txt
 
-if command -v parallel &> /dev/null; then
-    # Use GNU parallel if available (faster with progress bar)
-    echo "Using GNU parallel with $MAX_WORKERS workers..."
-
-    printf '%s\n' "${NPZ_FILES[@]}" | \
-        parallel -j "$MAX_WORKERS" --bar organize_file {} > /tmp/organize_results_xray.txt
-else
-    # Fallback to xargs
-    echo "Using xargs with $MAX_WORKERS workers..."
-    echo -e "${YELLOW}Tip: Install GNU parallel for progress tracking: sudo apt-get install parallel${NC}"
-
-    printf '%s\n' "${NPZ_FILES[@]}" | \
-        xargs -P "$MAX_WORKERS" -I {} bash -c 'organize_file "$@"' _ {} > /tmp/organize_results_xray.txt
-fi
+# Process files in parallel with xargs
+echo "Using xargs with $MAX_WORKERS workers for training set..."
+printf '%s\n' "${ROOT_FILES[@]}" | \
+    xargs -P "$MAX_WORKERS" -I {} bash -c 'move_to_train "$@"' _ {} > /tmp/train_results_xray.txt
 
 wait
 
-# Process results
-> /tmp/unmatched_files_xray.log
-> /tmp/organization_errors_xray.log
-> /tmp/duplicate_files_xray.log
+# Count results
+TRAIN_MOVED=0
+TRAIN_DUPLICATES=0
+TRAIN_ERRORS=0
 
 while IFS=':' read -r status filename ligand; do
     case "$status" in
-        linked)
-            ((SUCCESS++))
-            ((LINKED++))
+        train_moved)
+            ((TRAIN_MOVED++))
             ;;
-        moved)
-            ((SUCCESS++))
-            ((MOVED++))
+        train_duplicate)
+            ((TRAIN_DUPLICATES++))
             ;;
-        unmatched_linked)
-            ((SUCCESS++))
-            ((UNMATCHED++))
-            echo "$filename (ligand: $ligand) -> created folder: $ligand/" >> /tmp/unmatched_files_xray.log
-            ;;
-        unmatched_moved)
-            ((SUCCESS++))
-            ((UNMATCHED++))
-            echo "$filename (ligand: $ligand) -> created folder: $ligand/" >> /tmp/unmatched_files_xray.log
-            ;;
-        duplicate_removed)
-            ((SUCCESS++))
-            ((DUPLICATES++))
-            echo "$filename (already existed at destination)" >> /tmp/duplicate_files_xray.log
-            ;;
-        error)
-            ((ERRORS++))
-            echo "$filename" >> /tmp/organization_errors_xray.log
+        train_error)
+            ((TRAIN_ERRORS++))
             ;;
     esac
-done < /tmp/organize_results_xray.txt
+done < /tmp/train_results_xray.txt
 
+echo -e "${GREEN}✓ Training set processing complete${NC}"
+echo "  - Files moved: $TRAIN_MOVED"
+echo "  - Duplicates removed: $TRAIN_DUPLICATES"
+echo "  - Errors: $TRAIN_ERRORS"
+
+echo -e "\n${BLUE}[Step 6/6] Processing holdout set files...${NC}"
+
+# Re-scan for remaining files in root directory
+mapfile -t REMAINING_FILES < <(find "$SOURCE_DIR" -maxdepth 1 -type f -name "*.npz")
+REMAINING_COUNT=${#REMAINING_FILES[@]}
+
+echo "Found $REMAINING_COUNT .npz files remaining in root directory"
+
+if [[ $REMAINING_COUNT -eq 0 ]]; then
+    echo -e "${GREEN}✓ No remaining files to process${NC}"
+    rm -f "$TEMP_TRAIN_MAP" /tmp/train_map_xray.txt /tmp/train_results_xray.txt
+    echo "=========================================="
+    exit 0
+fi
+
+# Build filename -> ligand group mapping from xray_holdout.csv
+TEMP_HOLDOUT_MAP=$(mktemp)
+
+awk -F',' '
+NR == 1 { next }  # Skip header
+{
+    filename = $1
+    ligand = $2
+    # Trim whitespace and quotes
+    gsub(/^[ \t\r\n"]+|[ \t\r\n"]+$/, "", filename)
+    gsub(/^[ \t\r\n"]+|[ \t\r\n"]+$/, "", ligand)
+    if (filename != "" && ligand != "") {
+        print filename ":" ligand
+    }
+}' "$HOLDOUT_CSV" > "$TEMP_HOLDOUT_MAP"
+
+HOLDOUT_MAPPINGS=$(wc -l < "$TEMP_HOLDOUT_MAP")
+echo "Loaded $HOLDOUT_MAPPINGS filename mappings from xray_holdout.csv"
+
+# Function to move file to holdout folder
+move_to_holdout() {
+    local file="$1"
+    local filename=$(basename "$file")
+
+    # Look up ligand group from mapping
+    local ligand=$(grep "^${filename}:" /tmp/holdout_map_xray.txt 2>/dev/null | cut -d':' -f2)
+
+    if [[ -n "$ligand" ]]; then
+        local safe_ligand=$(echo "$ligand" | tr '/' '_' | tr '\\' '_')
+        local dest="${SOURCE_DIR}/xray_holdout/${safe_ligand}/${filename}"
+
+        # Check if file already exists at destination
+        if [[ -f "$dest" ]]; then
+            rm "$file"
+            echo "holdout_duplicate:$filename:$ligand"
+            return
+        fi
+
+        if mv "$file" "$dest" 2>/dev/null; then
+            echo "holdout_moved:$filename:$ligand"
+        else
+            echo "holdout_error:$filename:$ligand"
+        fi
+    else
+        # File not in holdout mapping - leave in root
+        echo "unmatched:$filename"
+    fi
+}
+
+export -f move_to_holdout
+
+# Copy mapping to /tmp for access in parallel processes
+cp "$TEMP_HOLDOUT_MAP" /tmp/holdout_map_xray.txt
+
+# Process files in parallel with xargs
+echo "Using xargs with $MAX_WORKERS workers for holdout set..."
+printf '%s\n' "${REMAINING_FILES[@]}" | \
+    xargs -P "$MAX_WORKERS" -I {} bash -c 'move_to_holdout "$@"' _ {} > /tmp/holdout_results_xray.txt
+
+wait
+
+# Count results
+HOLDOUT_MOVED=0
+HOLDOUT_DUPLICATES=0
+HOLDOUT_ERRORS=0
+UNMATCHED=0
+
+while IFS=':' read -r status filename ligand; do
+    case "$status" in
+        holdout_moved)
+            ((HOLDOUT_MOVED++))
+            ;;
+        holdout_duplicate)
+            ((HOLDOUT_DUPLICATES++))
+            ;;
+        holdout_error)
+            ((HOLDOUT_ERRORS++))
+            ;;
+        unmatched)
+            ((UNMATCHED++))
+            ;;
+    esac
+done < /tmp/holdout_results_xray.txt
+
+echo -e "${GREEN}✓ Holdout set processing complete${NC}"
+echo "  - Files moved: $HOLDOUT_MOVED"
+echo "  - Duplicates removed: $HOLDOUT_DUPLICATES"
+echo "  - Errors: $HOLDOUT_ERRORS"
+echo "  - Unmatched (stayed in root): $UNMATCHED"
+
+# Final summary
 echo -e "\n=========================================="
-echo -e "${GREEN}✓ Successfully organized $SUCCESS files${NC}"
-echo "  - Matched and linked: $LINKED"
-echo "  - Matched and moved: $MOVED"
-echo "  - Unmatched (individual folders): $UNMATCHED"
-echo "  - Duplicates removed: $DUPLICATES"
-
-if [[ $ERRORS -gt 0 ]]; then
-    echo -e "\n${YELLOW}⚠ Encountered $ERRORS errors${NC}"
-    echo "  Error details saved to: /tmp/organization_errors_xray.log"
-fi
-
-if [[ $DUPLICATES -gt 0 ]]; then
-    echo -e "\n${BLUE}ℹ $DUPLICATES duplicate files removed${NC}"
-    echo "  Duplicate files log saved to: /tmp/duplicate_files_xray.log"
-fi
-
-if [[ $UNMATCHED -gt 0 ]]; then
-    echo -e "\n${BLUE}ℹ $UNMATCHED files placed in individual ligand folders${NC}"
-    echo "  Unmatched files log saved to: /tmp/unmatched_files_xray.log"
-fi
-
-echo -e "\n${GREEN}✓ Organization complete!${NC}"
-echo "  Source directory: $(realpath "$SOURCE_DIR")"
-echo "  Memory optimization: Loaded only $MAPPING_COUNT CSV entries"
+echo -e "${GREEN}✓ File organization complete!${NC}"
+echo ""
+echo "Training set:"
+echo "  - Files moved: $TRAIN_MOVED"
+echo "  - Duplicates: $TRAIN_DUPLICATES"
+echo "  - Errors: $TRAIN_ERRORS"
+echo ""
+echo "Holdout set:"
+echo "  - Files moved: $HOLDOUT_MOVED"
+echo "  - Duplicates: $HOLDOUT_DUPLICATES"
+echo "  - Errors: $HOLDOUT_ERRORS"
+echo ""
+echo "Files remaining in root: $UNMATCHED"
 echo "=========================================="
 
 # Cleanup
-rm -f /tmp/organize_results_xray.txt /tmp/ligand_mapping_xray.txt /tmp/ligand_to_folder_map_xray.txt
+rm -f "$TEMP_TRAIN_MAP" "$TEMP_HOLDOUT_MAP"
+rm -f /tmp/train_map_xray.txt /tmp/holdout_map_xray.txt
+rm -f /tmp/train_results_xray.txt /tmp/holdout_results_xray.txt
+
+exit 0
