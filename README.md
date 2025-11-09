@@ -19,21 +19,24 @@ uv run streamlit run src/visualizations/blob_visualization.py
 ./src/scripts/download_ligand_mapping.sh
 ```
 ### Download and unpack blobs
-CryoEM:
-```bash
-./src/scripts/download_cryoem_blobs.sh
-```
 X-ray:
 ```bash
 ./src/scripts/download_xray_blobs.sh
 ```
-### Group blobs into classes
-CryoEM: TO-DO decision how to group them needed
+
+CryoEM:
 ```bash
-./src/scripts/group_cryoem_blobs.sh
+./src/scripts/download_cryoem_blobs.sh
 ```
+
+### Group blobs into classes according to xray mapping (run group_xray_blobs.sh first)
 X-ray:
 ```bash
 ./src/scripts/group_xray_blobs.sh
 ```
+CryoEM:
+```bash
+./src/scripts/group_cryoem_blobs.sh
+```
+
 
