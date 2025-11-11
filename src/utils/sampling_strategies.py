@@ -256,13 +256,45 @@ class SpatialStandardization(Transform):
         return blob
 
 
+class SpatialStandardization2(Transform):
+    """
+    Standardizes the blob based on local std values within a square_size x square_size x square_size cube around each voxel.
+    This process is repeated for a specified number of iterations to enhance local contrast.
+    """
+
+    def __init__(self, iterations: int = 1, square_size: int = 3):
+        if square_size % 2 == 0:
+            raise ValueError("square_size must be an odd number.")
+        self.iterations = iterations
+        self.square_size = square_size
+
+    def preprocess(self, blob: np.ndarray) -> np.ndarray:
+        for _ in range(self.iterations):
+            padded_blob = np.pad(blob, pad_width=self.square_size // 2, mode="edge")
+            windows = sliding_window_view(
+                padded_blob, (self.square_size, self.square_size, self.square_size)
+            )
+
+            # Compute std for each 3x3x3 cube
+            stds = windows.std(axis=(-3, -2, -1))
+            blob = blob / (stds + 1e-9)
+
+        # Rescale to [0, 1]
+        blob = blob - np.min(blob)
+        blob = blob / (np.max(blob) + 1e-9)
+
+        return blob
+
+
 class SpatialNormalization2(Transform):
     """
     Normalizes the blob based on local values within a square_size x square_size x square_size cube around each voxel.
     This process is repeated for a specified number of iterations to enhance local contrast.
     """
 
-    def __init__(self, iterations: int = 1, square_size: int = 3, percentile: float = 90):
+    def __init__(
+        self, iterations: int = 1, square_size: int = 3, percentile: float = 90
+    ):
         if square_size % 2 == 0:
             raise ValueError("square_size must be an odd number.")
         self.iterations = iterations
@@ -277,6 +309,44 @@ class SpatialNormalization2(Transform):
             )
 
             scale = np.percentile(windows, self.percentile, axis=(-3, -2, -1))
+            blob = blob / (scale + 1e-9)
+
+        # Rescale to [0, 1]
+        blob = blob - np.min(blob)
+        blob = blob / (np.max(blob) + 1e-9)
+
+        return blob
+
+
+class SpatialNormalization3(Transform):
+    """
+    Normalizes the blob based on local values within a square_size x square_size x square_size cube around each voxel.
+    This process is repeated for a specified number of iterations to enhance local contrast.
+    """
+
+    def __init__(
+        self,
+        iterations: int = 1,
+        square_size: int = 3,
+        percentile: float = 85,
+        threshold: float = 0.2,
+    ):
+        if square_size % 2 == 0:
+            raise ValueError("square_size must be an odd number.")
+        self.iterations = iterations
+        self.square_size = square_size
+        self.percentile = percentile
+        self.threshold = threshold
+
+    def preprocess(self, blob: np.ndarray) -> np.ndarray:
+        for _ in range(self.iterations):
+            padded_blob = np.pad(blob, pad_width=self.square_size // 2, mode="edge")
+            windows = sliding_window_view(
+                padded_blob, (self.square_size, self.square_size, self.square_size)
+            )
+
+            scale = np.percentile(windows, self.percentile, axis=(-3, -2, -1))
+            scale[scale < self.threshold] = 1.0
             blob = blob / (scale + 1e-9)
 
         # Rescale to [0, 1]

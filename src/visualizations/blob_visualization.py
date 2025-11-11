@@ -13,8 +13,10 @@ from utils.sampling_strategies import (
     UniformSelectionTransform,
     ProbabilisticSelectionTransform,
     SpatialNormalization,
-    SpatialStandardization,
     SpatialNormalization2,
+    SpatialNormalization3,
+    SpatialStandardization,
+    SpatialStandardization2,
     PowerTransform,
     TemperatureScaling,
 )
@@ -26,7 +28,9 @@ TRANSFORM_CLASSES = {
     "ProbabilisticSelectionTransform": ProbabilisticSelectionTransform,
     "SpatialNormalization": SpatialNormalization,
     "SpatialNormalization2": SpatialNormalization2,
+    "SpatialNormalization3": SpatialNormalization3,
     "SpatialStandardization": SpatialStandardization,
+    "SpatialStandardization2": SpatialStandardization2,
     "PowerTransform": PowerTransform,
     "TemperatureScaling": TemperatureScaling,
 }
