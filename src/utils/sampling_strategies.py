@@ -26,7 +26,7 @@ class RandomSelectionTransform(Transform):
     A class that limit voxels in the blob by drawing random non-zero voxels.
     """
 
-    def __init__(self, max_blob_size: int):
+    def __init__(self, max_blob_size: int = 2000):
         self.max_blob_size = max_blob_size
 
     def preprocess(self, blob: np.ndarray) -> np.ndarray:
@@ -58,7 +58,7 @@ class UniformSelectionTransform(Transform):
     The value of that point depends on the chosen method.
     """
 
-    def __init__(self, max_blob_size: int, method: str = "max") -> None:
+    def __init__(self, max_blob_size: int = 2000, method: str = "max") -> None:
         methods = {
             "basic": UniformSelectionTransform._basic_selection,
             "average": UniformSelectionTransform._average_selection,
@@ -171,7 +171,7 @@ class ProbabilisticSelectionTransform(Transform):
     Probabilities are adjusted using a alpha parameter to control the sharpness of the distribution.
     """
 
-    def __init__(self, max_blob_size: int):
+    def __init__(self, max_blob_size: int = 2000):
         self.max_blob_size = max_blob_size
 
     def preprocess(self, blob: np.ndarray) -> np.ndarray:
@@ -196,7 +196,7 @@ class ProbabilisticSelectionTransform(Transform):
         return blob * mask
 
 
-class SpacialNormalization(Transform):
+class SpatialNormalization(Transform):
     """
     Normalizes the blob based on local min and max values within a square_size x square_size x square_size cube around each voxel.
     This process is repeated for a specified number of iterations to enhance local contrast.
@@ -220,6 +220,68 @@ class SpacialNormalization(Transform):
             maxs = windows.max(axis=(-3, -2, -1))
 
             blob = (blob - mins) / (maxs - mins + 1e-9)
+
+        return blob
+
+
+class SpatialStandardization(Transform):
+    """
+    Standardizes the blob based on local mean and std values within a square_size x square_size x square_size cube around each voxel.
+    This process is repeated for a specified number of iterations to enhance local contrast.
+    """
+
+    def __init__(self, iterations: int = 1, square_size: int = 3):
+        if square_size % 2 == 0:
+            raise ValueError("square_size must be an odd number.")
+        self.iterations = iterations
+        self.square_size = square_size
+
+    def preprocess(self, blob: np.ndarray) -> np.ndarray:
+        for _ in range(self.iterations):
+            padded_blob = np.pad(blob, pad_width=self.square_size // 2, mode="edge")
+            windows = sliding_window_view(
+                padded_blob, (self.square_size, self.square_size, self.square_size)
+            )
+
+            # Compute mean and std for each 3x3x3 cube
+            means = windows.mean(axis=(-3, -2, -1))
+            stds = windows.std(axis=(-3, -2, -1))
+
+            blob = (blob - means) / (stds + 1e-9)
+
+        # Rescale to [0, 1]
+        blob = blob - np.min(blob)
+        blob = blob / (np.max(blob) + 1e-9)
+
+        return blob
+
+
+class SpatialNormalization2(Transform):
+    """
+    Normalizes the blob based on local values within a square_size x square_size x square_size cube around each voxel.
+    This process is repeated for a specified number of iterations to enhance local contrast.
+    """
+
+    def __init__(self, iterations: int = 1, square_size: int = 3, percentile: float = 90):
+        if square_size % 2 == 0:
+            raise ValueError("square_size must be an odd number.")
+        self.iterations = iterations
+        self.square_size = square_size
+        self.percentile = percentile
+
+    def preprocess(self, blob: np.ndarray) -> np.ndarray:
+        for _ in range(self.iterations):
+            padded_blob = np.pad(blob, pad_width=self.square_size // 2, mode="edge")
+            windows = sliding_window_view(
+                padded_blob, (self.square_size, self.square_size, self.square_size)
+            )
+
+            scale = np.percentile(windows, self.percentile, axis=(-3, -2, -1))
+            blob = blob / (scale + 1e-9)
+
+        # Rescale to [0, 1]
+        blob = blob - np.min(blob)
+        blob = blob / (np.max(blob) + 1e-9)
 
         return blob
 
