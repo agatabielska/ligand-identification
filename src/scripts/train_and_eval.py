@@ -6,7 +6,7 @@ from pipeline.pipeline import Pipeline
 from pipeline.data_loader import NPZDataLoader
 from pipeline.samplers import StochasticSampler
 from models.clifford.model import CliffordSteerableNetwork
-from utils.sampling_strategies import ProbabilisticSelectionTransform
+from utils.sampling_strategies import ProbabilisticSelectionTransform, UniformSelectionTransform
 import numpy as np
 
 if __name__ == "__main__":
@@ -17,15 +17,15 @@ if __name__ == "__main__":
     print("Clifford Steerable Convolution - Example Usage")
     print("=" * 70)
     
-    transformer = ProbabilisticSelectionTransform(2048)
+    transformer = UniformSelectionTransform(max_blob_size=2000, method='max')
     def preprocess(blob: np.ndarray) -> np.ndarray:
         """ Create point cloud from voxel grid blob. """
         blob = transformer.preprocess(blob)    
         # blob consists of 0s and 1s, get 1s coordinates
         points = np.argwhere(blob > 0)
-        # pad points to 2048
-        points = np.pad(points, ((0, 2048 - points.shape[0]), (0, 0)), mode='constant', constant_values=0)
-        points = points.reshape(8, 16, 16, 3).transpose(3, 0, 1, 2)  # (3, 8, 16, 16) (c_in, D, H, W)
+        # pad points to 2000
+        points = np.pad(points, ((0, 2000 - points.shape[0]), (0, 0)), mode='constant', constant_values=0)
+        points = points.reshape(5, 20, 20, 3).transpose(3, 0, 1, 2)  # (3, 8, 16, 16) (c_in, D, H, W)
         return points.astype(np.float32)
     
     # Create dataloader with point cloud preprocessing
@@ -34,11 +34,14 @@ if __name__ == "__main__":
     sampler = StochasticSampler(
         num_samples=batch_size * 5000,  # Number of samples per epoch
         random_seed=42,
-        replacement=True
+        replacement=False
     )
     
     data_loader = NPZDataLoader(
         root_dir=os.path.join(project_root, 'data/xray_blobs/'),
+        train_folder = 'xray_train',
+        val_folder = 'xray_holdout',
+        test_folder = None,
         preprocess_fn=preprocess,
         npz_key=None,  # Use first key in NPZ file
         train_split=0.7,

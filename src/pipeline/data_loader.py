@@ -125,6 +125,9 @@ class NPZDataLoader:
     def __init__(
         self,
         root_dir: str,
+        train_folder: Optional[str] = None,
+        val_folder: Optional[str] = None,
+        test_folder: Optional[str] = None,
         sampler = None,
         preprocess_fn: Optional[Callable] = None,
         npz_key: Optional[str] = None,
@@ -155,6 +158,9 @@ class NPZDataLoader:
             logging: Whether to print detailed logs
         """
         self.root_dir = Path(root_dir)
+        self.train_folder = train_folder
+        self.val_folder = val_folder
+        self.test_folder = test_folder
         self.sampler = sampler
         self.preprocess_fn = preprocess_fn
         self.npz_key = npz_key
@@ -173,12 +179,67 @@ class NPZDataLoader:
             "Train, val, and test splits must sum to 1.0"
         
         # Scan directory and create datasets
-        self._scan_directory()
-        self._create_splits()
+        if self.train_folder or self.val_folder or self.test_folder:
+            # Use specified folders for splits
+            self._create_splits_from_folders()
+        else:
+            # Create splits from all data
+            self._scan_directory()
+            self._create_splits()
         
         # Initialize sampler with data source
         if self.sampler is not None:
             self.sampler.set_data_source(self.train_dataset)
+            
+    def _create_splits_from_folders(self):
+        """Create datasets from specified train/val/test folders."""
+        if self.logging:
+            print("Creating datasets from specified folders...")
+        
+        def load_folder(folder_name: str) -> Tuple[List[Path], List[int]]:
+            folder_path = self.root_dir / folder_name
+            if not folder_path.exists():
+                raise ValueError(f"Folder not found: {folder_path}")
+            
+            file_paths = []
+            labels = []
+            class_dirs = [d for d in folder_path.iterdir() if d.is_dir()]
+            class_dirs = sorted(class_dirs, key=lambda x: x.name)
+            name_to_label = {d.name: idx for idx, d in enumerate(class_dirs)}
+            
+            for class_dir in class_dirs:
+                label = name_to_label[class_dir.name]
+                files = list(class_dir.glob(self.file_pattern))
+                file_paths.extend(files)
+                labels.extend([label] * len(files))
+            
+            return file_paths, labels
+        
+        # Load each split
+        train_files, train_labels = load_folder(self.train_folder) if self.train_folder else ([], [])
+        val_files, val_labels = load_folder(self.val_folder) if self.val_folder else ([], [])
+        test_files, test_labels = load_folder(self.test_folder) if self.test_folder else ([], [])
+        
+        # Create datasets
+        self.train_dataset = NPZDataset(
+            train_files, train_labels, {},
+            self.preprocess_fn, self.npz_key, cache_data=self.cache_data
+        )
+        
+        self.val_dataset = NPZDataset(
+            val_files, val_labels, {},
+            self.preprocess_fn, self.npz_key, cache_data=self.cache_data
+        )
+        
+        self.test_dataset = NPZDataset(
+            test_files, test_labels, {},
+            self.preprocess_fn, self.npz_key, cache_data=self.cache_data
+        )
+        
+        if self.logging:
+            print(f"Train set: {len(self.train_dataset)} samples")
+            print(f"Val set: {len(self.val_dataset)} samples")
+            print(f"Test set: {len(self.test_dataset)} samples")
         
     def _scan_directory(self):
         """Scan directory structure and collect files with labels."""
@@ -321,8 +382,11 @@ class NPZDataLoader:
                 percentage = 100 * count / len(labels)
                 print(f"  {class_name}: {count} ({percentage:.1f}%)")
     
-    def get_train_loader(self, shuffle: bool = True) -> DataLoader:
+    def get_train_loader(self, shuffle: bool = True) -> Optional[DataLoader]: 
         """Get training DataLoader."""
+        if len(self.train_dataset) == 0:
+            return None
+        
         if self.sampler is not None:
             return DataLoader(
                 self.train_dataset,
@@ -340,8 +404,11 @@ class NPZDataLoader:
                 num_workers=self.num_workers,
                 pin_memory=True
             )
-    def get_val_loader(self, shuffle: bool = False) -> DataLoader:
+    def get_val_loader(self, shuffle: bool = False) -> Optional[DataLoader]:
         """Get validation DataLoader."""
+        if len(self.val_dataset) == 0:
+            return None
+        
         return DataLoader(
             self.val_dataset,
             batch_size=self.batch_size,
@@ -350,8 +417,11 @@ class NPZDataLoader:
             pin_memory=True
         )
     
-    def get_test_loader(self, shuffle: bool = False) -> DataLoader:
+    def get_test_loader(self, shuffle: bool = False) -> Optional[DataLoader]:
         """Get test DataLoader."""
+        if len(self.test_dataset) == 0:
+            return None
+        
         return DataLoader(
             self.test_dataset,
             batch_size=self.batch_size,
@@ -360,7 +430,7 @@ class NPZDataLoader:
             pin_memory=True
         )
     
-    def get_all_loaders(self) -> Tuple[DataLoader, DataLoader, DataLoader]:
+    def get_all_loaders(self) -> Tuple[Optional[DataLoader], Optional[DataLoader], Optional[DataLoader]]:
         """Get all three DataLoaders at once."""
         return (
             self.get_train_loader(),
