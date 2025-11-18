@@ -20,8 +20,8 @@ def transform(npz):
     return torch.from_numpy(points)
 
 
-train_dataset = BlobDataset(path="data/train", transform=transform)
-val_dataset = BlobDataset(path="data/test", transform=transform)
+train_dataset = BlobDataset(path="data/processed/train", transform=transform)
+val_dataset = BlobDataset(path="data/processed/test", transform=transform)
 
 train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=4)
 val_dataloader = DataLoader(val_dataset, batch_size=16, shuffle=False, num_workers=4)
@@ -43,13 +43,14 @@ trainer = pl.Trainer(
 )
 
 model = CliffordSteerableNetwork(
-    p=3, q=0,
+    p=3,
+    q=0,
     in_channels=3,
     hidden_channels=[32, 64, 128],
-    out_channels=233,
+    out_channels=219,
     n_shells=3,
     kernel_size=3,
-    learning_rate=1e-3
+    learning_rate=1e-3,
 )
 
 
