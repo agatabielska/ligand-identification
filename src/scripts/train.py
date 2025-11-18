@@ -23,8 +23,12 @@ def transform(npz):
 train_dataset = BlobDataset(path="data/processed/train", transform=transform)
 val_dataset = BlobDataset(path="data/processed/test", transform=transform)
 
-train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=4)
-val_dataloader = DataLoader(val_dataset, batch_size=16, shuffle=False, num_workers=4)
+train_dataloader = DataLoader(
+    train_dataset, batch_size=128, shuffle=True, num_workers=64, pin_memory=True
+)
+val_dataloader = DataLoader(
+    val_dataset, batch_size=128, shuffle=False, num_workers=64, pin_memory=True
+)
 
 
 checkpoint_callback = ModelCheckpoint(
