@@ -505,4 +505,11 @@ class CliffordSteerableNetwork(pl.LightningModule):
             factor=self.scheduler_factor,
             patience=self.scheduler_patience,
         )
-        return {"optimizer": optimizer, "lr_scheduler": scheduler}
+
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "monitor": "val_loss",
+            },
+        }
