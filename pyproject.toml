@@ -12,3 +12,8 @@ dependencies = [
     "streamlit>=1.50.0",
     "torch>=2.9.0",
 ]
+
+[dependency-groups]
+dev = [
+    "ipython>=9.7.0",
+]
