@@ -1,6 +1,7 @@
 from torch.utils.data import Dataset
 from pathlib import Path
 import numpy as np
+import torch
 
 
 class BlobDataset(Dataset):
@@ -27,6 +28,7 @@ class BlobDataset(Dataset):
 
             A = np.zeros(shape, dtype=vals.dtype)
             A[idx[:, 0], idx[:, 1], idx[:, 2]] = vals
+            A = torch.from_numpy(A)
             return A, label
         else:
             return self.transform(npz), label
