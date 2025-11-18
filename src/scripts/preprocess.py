@@ -40,8 +40,8 @@ def preprocess(
 
         blob = data[keys[0]]
         blob = transform.preprocess(blob)
-        idx = np.argwhere(blob != 0)
-        values = blob[blob != 0]
+        idx = np.argwhere(blob > 0)
+        values = blob[blob > 0]
         processed_data = {"indices": idx, "values": values, "shape": blob.shape}
         (output_path / str(label)).mkdir(parents=True, exist_ok=True)
         np.savez_compressed(output_path / str(label) / file_path.name, **processed_data)
@@ -73,7 +73,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--chunk-size",
         type=int,
-        default=100,
+        default=10000,
         help="Number of files to process in each chunk.",
     )
     parser.add_argument(
