@@ -465,7 +465,7 @@ class CliffordSteerableNetwork(pl.LightningModule):
         loss = F.cross_entropy(y_hat, y)
         pred = y_hat.argmax(dim=1)
         acc = (pred == y).float().mean()
-        top_10_acc = torch.sum(
+        top_10_acc = sum(
             [
                 1 if y[i] in torch.topk(y_hat[i], k=10).indices else 0
                 for i in range(y.size(0))
@@ -483,7 +483,7 @@ class CliffordSteerableNetwork(pl.LightningModule):
         loss = F.cross_entropy(y_hat, y)
         pred = y_hat.argmax(dim=1)
         acc = (pred == y).float().mean()
-        top_10_acc = torch.sum(
+        top_10_acc = sum(
             [
                 1 if y[i] in torch.topk(y_hat[i], k=10).indices else 0
                 for i in range(y.size(0))
