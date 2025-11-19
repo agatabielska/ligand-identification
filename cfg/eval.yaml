@@ -1,5 +1,5 @@
-batch_size: 128
-dataset_dir: ../data/blobs_uniform_2000_max
+batch_size: 1
+dataset_dir: ../data/blobs_full
 dataset_file: ../data/holdout.csv
 device: cuda
 model_epoch: 6

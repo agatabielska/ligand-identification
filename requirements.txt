@@ -11,5 +11,5 @@ plyfile
 pytest~=7.1.0
 scikit-optimize
 open3d
-torch
+torch==1.10.0+cu113
 wget

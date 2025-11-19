@@ -1,12 +1,9 @@
 import torch.nn as nn
 
-from models.create import transloc3d, minkloc3dv2, pointnet, riconv2
+from models.create import minkloc3dv2
 
 MODELS = {
-    "transloc3d": transloc3d,
     "minkloc3d": minkloc3dv2,
-    "pointnet": pointnet,
-    "riconv2": riconv2
 }
 
 
