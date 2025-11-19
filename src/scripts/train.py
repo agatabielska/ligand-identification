@@ -20,14 +20,16 @@ def transform(npz):
     return torch.from_numpy(points)
 
 
-train_dataset = BlobDataset(path="data/processed/train", transform=transform)
-val_dataset = BlobDataset(path="data/processed/test", transform=transform)
+train_dataset = BlobDataset(
+    path="data/processed/train", transform=transform, cache=True
+)
+val_dataset = BlobDataset(path="data/processed/test", transform=transform, cache=True)
 
 train_dataloader = DataLoader(
-    train_dataset, batch_size=8192, shuffle=True, num_workers=16, pin_memory=True
+    train_dataset, batch_size=128, shuffle=True, num_workers=64, pin_memory=True
 )
 val_dataloader = DataLoader(
-    val_dataset, batch_size=8192, shuffle=False, num_workers=16, pin_memory=True
+    val_dataset, batch_size=128, shuffle=False, num_workers=64, pin_memory=True
 )
 
 
