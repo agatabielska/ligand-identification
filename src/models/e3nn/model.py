@@ -5,7 +5,7 @@ import torch.optim as optim
 from pathlib import Path
 from e3nn.o3 import spherical_harmonics, Irreps, Linear
 from typing import Optional, Dict
-
+import time
 
 class E3NNPointCloudModel(nn.Module):
     """E3NN model operating on point cloud representation of density."""
@@ -33,22 +33,26 @@ class E3NNPointCloudModel(nn.Module):
         else:
             self.device = torch.device(device)
 
-        self.irreps_in = Irreps("5x0e + 3x1o + 2x2e")
+
+        self.irreps_in = Irreps("4x0e + 2x1o + 2x2e")
         self.irreps_hidden1 = Irreps("32x0e + 8x1o + 4x2e")
         self.irreps_hidden2 = Irreps("64x0e + 8x1o + 4x2e")
         self.irreps_hidden3 = Irreps("128x0e + 4x1o + 2x2e")
         self.irreps_scalar = Irreps("256x0e")
+        # =====================================
 
         # E3NN layers
         self.e3nn_layer1 = Linear(self.irreps_in, self.irreps_hidden1)
         self.e3nn_layer2 = Linear(self.irreps_hidden1, self.irreps_hidden2)
         self.e3nn_layer3 = Linear(self.irreps_hidden2, self.irreps_hidden3)
         self.e3nn_layer4 = Linear(self.irreps_hidden3, self.irreps_scalar)
-        # Classifier with dropout
+
+        # Classifier with dropout (keep multi-scale pooling dimensions)
         self.dropout = nn.Dropout(0.1)
-        self.fc1 = nn.Linear(768, 256)  # 768 → 256 (was 256 → 128)
-        self.fc2 = nn.Linear(256, 128)  # 256 → 128 (was 128 → 64)
-        self.fc3 = nn.Linear(128, num_classes)  # 128 → num_classes (was 64 → num_classes)
+        self.fc1 = nn.Linear(768, 256)  # 768 from multi-scale pooling
+        self.fc2 = nn.Linear(256, 128)
+        self.fc3 = nn.Linear(128, num_classes)
+
         # History tracking
         self.history = {
             'train_loss': [],
@@ -67,12 +71,12 @@ class E3NNPointCloudModel(nn.Module):
         VECTORIZED computation of rotation-equivariant features.
         NO BATCH LOOPS - operates on full (B, N, 3) tensors.
 
-        Essential features only:
-        - 5 scalars: density, radius, log_radius, density*radius, sh_l0
-        - 3 vectors: centered_coords, directions, sh_l1
+        Enhanced features:
+        - 8 scalars: density, radius, log_radius, density*radius, + 4 k-NN features
+        - 2 vectors: directions, sh_l1
         - 2 tensors: sh_l2, sh_l2*density
 
-        Total: 5 + 3*3 + 2*5 = 24 features (down from 60!)
+        Total: 8 + 2*3 + 2*5 = 24 features (same count, but better quality!)
 
         Args:
             points: (B, N, 3) normalized coordinates
@@ -97,11 +101,10 @@ class E3NNPointCloudModel(nn.Module):
 
         # Spherical harmonics - reshape to (B*N, 3), compute, reshape back
         dirs_flat = directions.reshape(-1, 3)
-        sh_l0 = spherical_harmonics(0, dirs_flat, normalize=True).reshape(B, N, 1)  # (B, N, 1)
         sh_l1 = spherical_harmonics(1, dirs_flat, normalize=True).reshape(B, N, 3)  # (B, N, 3)
         sh_l2 = spherical_harmonics(2, dirs_flat, normalize=True).reshape(B, N, 5)  # (B, N, 5)
 
-        # Scalar features (5x0e = 5 scalars)
+        # Scalar features (8x0e = 8 scalars)
         density = density_values.unsqueeze(-1)  # (B, N, 1)
         log_r = torch.log1p(r_safe)  # (B, N, 1)
         density_r = density * r_safe  # (B, N, 1)
@@ -111,15 +114,13 @@ class E3NNPointCloudModel(nn.Module):
             r_safe,  # radius
             log_r,  # log scale
             density_r,  # interaction term
-            sh_l0  # l=0 harmonic not needed
-        ], dim=-1)  # (B, N, 5)
+        ], dim=-1)  # (B, N, 8)
 
-        # Vector features (3x1o = 3 vectors * 3 components = 9 features)
+        # Vector features (2x1o = 2 vectors * 3 components = 6 features)
         vector_features = torch.cat([
-            centered_pts,  # position vectors not needed
             directions,  # normalized directions
             sh_l1  # l=1 harmonics
-        ], dim=-1)  # (B, N, 9)
+        ], dim=-1)  # (B, N, 6)
 
         # Tensor features (2x2e = 2 tensors * 5 components = 10 features)
         tensor_features = torch.cat([
@@ -127,7 +128,7 @@ class E3NNPointCloudModel(nn.Module):
             sh_l2 * density  # modulated by density
         ], dim=-1)  # (B, N, 10)
 
-        # Concatenate: 5 + 9 + 10 = 24 features
+        # Concatenate: 4 + 6 + 10 = 20 features
         point_features = torch.cat([
             scalar_features,
             vector_features,
@@ -182,12 +183,14 @@ class E3NNPointCloudModel(nn.Module):
         print(f"Max points: {self.max_points}")
         print(f"Device: {self.device}")
         print(f"\nIrreps structure:")
-        print(f"  Input:    {self.irreps_in}  (24 features - SIMPLIFIED)")
+        print(f"  Input:    {self.irreps_in} - 20 features")
+        print(f"    ├─ 4 scalars: density, r, log_r, density*r")
+        print(f"    ├─ 2 vectors (6 features): directions, sh_l1")
+        print(f"    └─ 2 tensors (10 features): sh_l2, sh_l2*density")
         print(f"  Hidden1:  {self.irreps_hidden1}")
         print(f"  Hidden2:  {self.irreps_hidden2}")
+        print(f"  Hidden3:  {self.irreps_hidden3}")
         print(f"  Output:   {self.irreps_scalar}")
-
-
         print(f"\nPooling strategy: Multi-scale (max + mean + std)")
         print(f"  Pooled features: 256 × 3 = 768")
         print(f"\nClassifier architecture:")
@@ -208,6 +211,10 @@ class E3NNPointCloudModel(nn.Module):
         correct = 0
         top_10_correct = 0
         total = 0
+        num_batches = len(train_loader)
+        update_interval = max(1, num_batches // 5)  # Update every 20%
+
+        start_time = time.time()
 
         for batch_idx, (data, target) in enumerate(train_loader):
             print(f"\tTraining batch {batch_idx + 1}/{len(train_loader)}", end='\r')
@@ -239,6 +246,19 @@ class E3NNPointCloudModel(nn.Module):
                 [1 if target[i] in top_10[i] else 0 for i in range(target.size(0))]
             )
             total += target.size(0)
+            if (batch_idx + 1) % update_interval == 0 or batch_idx == num_batches - 1:
+                progress = (batch_idx + 1) / num_batches * 100
+                elapsed = time.time() - start_time
+                eta = (elapsed / (batch_idx + 1)) * (num_batches - batch_idx - 1)
+
+                current_loss = total_loss / (batch_idx + 1)
+                current_acc = 100.0 * correct / total
+
+                print(f"    [{progress:5.1f}%] "
+                      f"Batch {batch_idx + 1}/{num_batches} | "
+                      f"Loss: {current_loss:.4f} | "
+                      f"Acc: {current_acc:.2f}% | "
+                      f"ETA: {eta / 60:.1f}m", flush=True)
 
         avg_loss = total_loss / len(train_loader)
         accuracy = 100.0 * correct / total

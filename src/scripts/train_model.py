@@ -20,36 +20,34 @@ transformer = ProbabilisticSelectionTransform(max_blob_size=MAX_POINTS)
 
 
 def preprocess_pointcloud(blob: np.ndarray) -> np.ndarray:
-    """
-    Preprocess dense voxel grid into a point cloud using probabilistic sampling.
-
-    Returns:
-        np.ndarray: Shape (MAX_POINTS, 4). Columns are [x, y, z, density].
-                    Coordinates are normalized to [-1, 1].
-    """
+    """Enhanced preprocessing for X-ray density data."""
     sampled_blob = transformer.preprocess(blob)
-    coords = np.argwhere(sampled_blob > 0)  # (N, 3)
-    values = sampled_blob[sampled_blob > 0]  # (N,)
+    coords = np.argwhere(sampled_blob > 0)
+    values = sampled_blob[sampled_blob > 0]
 
     if len(coords) == 0:
-        # Fallback for empty blobs (rare but possible)
         return np.zeros((MAX_POINTS, 4), dtype=np.float32)
 
-    center = np.array(blob.shape) / 2
-    scale = np.max(blob.shape) / 2
-    norm_coords = (coords - center) / scale
-
+    # Normalize by actual point cloud extent
+    center = coords.mean(axis=0)  # Use actual center of mass
+    centered_coords = coords - center
+    scale = np.percentile(np.linalg.norm(centered_coords, axis=1), 95)  # Robust scaling
+    scale = max(scale, 1.0)  # Prevent division by zero
+    norm_coords = centered_coords / scale
     points = np.column_stack([norm_coords, values])
 
     current_points = points.shape[0]
     if current_points < MAX_POINTS:
         padding = np.zeros((MAX_POINTS - current_points, 4), dtype=np.float32)
+
         points = np.vstack([points, padding])
+
     elif current_points > MAX_POINTS:
-        # Should be handled by transformer, but safety check
         points = points[:MAX_POINTS, :]
 
+
     return points.astype(np.float32)
+
 
 
 if __name__ == "__main__":
