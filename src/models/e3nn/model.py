@@ -46,10 +46,9 @@ class E3NNPointCloudModel(nn.Module):
         self.e3nn_layer4 = Linear(self.irreps_hidden3, self.irreps_scalar)
         # Classifier with dropout
         self.dropout = nn.Dropout(0.1)
-        self.fc1 = nn.Linear(256, 128)  # 256 → 128
-        self.fc2 = nn.Linear(128, 64)  # 128 → 64
-        self.fc3 = nn.Linear(64, num_classes)  # 64 → 219
-
+        self.fc1 = nn.Linear(768, 256)  # 768 → 256 (was 256 → 128)
+        self.fc2 = nn.Linear(256, 128)  # 256 → 128 (was 128 → 64)
+        self.fc3 = nn.Linear(128, num_classes)  # 128 → num_classes (was 64 → num_classes)
         # History tracking
         self.history = {
             'train_loss': [],
@@ -112,12 +111,12 @@ class E3NNPointCloudModel(nn.Module):
             r_safe,  # radius
             log_r,  # log scale
             density_r,  # interaction term
-            sh_l0  # l=0 harmonic
+            sh_l0  # l=0 harmonic not needed
         ], dim=-1)  # (B, N, 5)
 
         # Vector features (3x1o = 3 vectors * 3 components = 9 features)
         vector_features = torch.cat([
-            centered_pts,  # position vectors
+            centered_pts,  # position vectors not needed
             directions,  # normalized directions
             sh_l1  # l=1 harmonics
         ], dim=-1)  # (B, N, 9)
@@ -161,12 +160,16 @@ class E3NNPointCloudModel(nn.Module):
         x = self.e3nn_layer4(x)  # (B, N, 256)
 
         # Global pooling (rotation invariant)
-        x = torch.max(x, dim=1)[0]  # (B, 256) - max pooling over points
+        x_max = torch.max(x, dim=1)[0]  # (B, 256) - captures strongest features
+        x_mean = torch.mean(x, dim=1)  # (B, 256) - captures average distribution
+        x_std = torch.std(x, dim=1)  # (B, 256) - captures variance/spread
 
+        # Concatenate all pooling strategies
+        x = torch.cat([x_max, x_mean, x_std], dim=-1)  # (B, 768)
         # Classification head
-        x = torch.relu(self.fc1(self.dropout(x)))  # 256 → 128 (+ ReLU)
-        x = torch.relu(self.fc2(self.dropout(x)))  # 128 → 64  (+ ReLU) ← FIXED
-        x = self.fc3(x)
+        x = torch.relu(self.fc1(self.dropout(x)))  # 768 → 256
+        x = torch.relu(self.fc2(self.dropout(x)))  # 256 → 128
+        x = self.fc3(x)  # 128 → num_classes
 
         return x
 
@@ -183,6 +186,14 @@ class E3NNPointCloudModel(nn.Module):
         print(f"  Hidden1:  {self.irreps_hidden1}")
         print(f"  Hidden2:  {self.irreps_hidden2}")
         print(f"  Output:   {self.irreps_scalar}")
+
+
+        print(f"\nPooling strategy: Multi-scale (max + mean + std)")
+        print(f"  Pooled features: 256 × 3 = 768")
+        print(f"\nClassifier architecture:")
+        print(f"  fc1: 768 → 256 (+ ReLU + Dropout)")
+        print(f"  fc2: 256 → 128 (+ ReLU + Dropout)")
+        print(f"  fc3: 128 → {self.num_classes}")
 
         total_params = sum(p.numel() for p in self.parameters())
         trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)

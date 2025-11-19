@@ -57,7 +57,7 @@ if __name__ == "__main__":
     project_root = os.path.abspath(os.path.join(scripts_path, '..', '..'))
 
     print("=" * 70)
-    print("E3NN Point Cloud Model - Training on X-ray Data")
+    print("E3NN Model - Training on X-ray Data")
     print("=" * 70)
 
     # Create sampler
