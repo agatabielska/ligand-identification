@@ -11,6 +11,8 @@ import models
 from cfg import read_config
 from data import SparseDataset, dataset_split, collation_fn_sparse
 
+from tqdm import tqdm
+
 
 def seed_worker(worker_id):
     worker_seed = torch.initial_seed() % 2 ** 32
@@ -58,10 +60,10 @@ if __name__ == "__main__":
     log.config(run=run, model=model, criterion=criterion, optimizer=optimizer, dataset=dataset)
 
     accum_iter = cfg["accum_iter"]
-    for e in range(cfg["epochs"]):
+    for e in tqdm(range(cfg["epochs"]), desc="epoch"):
         train_dataloader.dataset.sample(e)
         model.train()
-        for idx, (coords, feats, labels) in enumerate(train_dataloader):
+        for idx, (coords, feats, labels) in tqdm(enumerate(train_dataloader), desc="batch"):
             labels = labels.to(device=device)
             batch = ME.SparseTensor(feats, coords, device=device)
             try:
@@ -73,7 +75,8 @@ if __name__ == "__main__":
                 if not idx % accum_iter:
                     optimizer.step()
                     optimizer.zero_grad()
-            except:
+            except e:
+                print(e)
                 pass
 
             if device == torch.device("cuda"):

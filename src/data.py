@@ -25,7 +25,8 @@ class BaseDataset(Dataset, ABC):
             rng_seed: int = 23,
             min_size: int = None,
             max_size: int = None,
-            normalize: bool = False
+            normalize: bool = False,
+            load_in_memory: bool = False
     ):
         """
         :param annotations_file_path: path to the directory containing directory
@@ -35,7 +36,8 @@ class BaseDataset(Dataset, ABC):
         file has to contain columns 'ligands' and 'blob_map_file'
         :param max_size: maximal number of instances of each class present in the dataset
         :param min_size: minimal number of instances of each class present in the dataset
-        :param normalize: whether to normalize the point clout
+        :param normalize: whether to normalize the point cloud
+        :param load_in_memory: whether to preload all blobs into RAM for faster access
         """
         seed(rng_seed)
         self.annotations_file_path = annotations_file_path
@@ -61,6 +63,15 @@ class BaseDataset(Dataset, ABC):
         self.min_size = min_size
         self.max_size = max_size
         self.normalize = normalize
+        self.load_in_memory = load_in_memory
+
+        
+    def _get_blob(self, filename: str) -> torch.Tensor:
+        blob_path = os.path.join(self.annotations_file_path, filename)
+        blob_data = np.load(blob_path, allow_pickle=False)["blob"]
+        blob_tensor = torch.tensor(blob_data, dtype=torch.float32)
+        return blob_tensor
+
 
     def sample(self, seed: int = None) -> None:
         """
@@ -117,23 +128,22 @@ class SparseDataset(BaseDataset):
         super().__init__(*args, **kwargs)
 
     @staticmethod
-    def _get_coords_feats(batch: torch.Tensor) -> ME.SparseTensor:
-        coordinates = torch.nonzero(batch).int()
-        features = []
-        for idx in coordinates:
-            features.append(batch[tuple(idx)])
-        features = torch.tensor(features).unsqueeze(-1)
+    def _get_coords_feats(batch: torch.Tensor) -> tuple:
+        coordinates = torch.nonzero(batch).long()
+        if coordinates.numel() == 0:
+            return coordinates, torch.empty((0, 1), dtype=torch.float32)
+
+        values = batch[tuple(coordinates.t())]
+        features = values.unsqueeze(-1)
         return coordinates, features
 
     def __getitem__(self, idx):
         label = torch.tensor(self.labels[idx], dtype=torch.float32)
-        idx = self.files[idx]
-        blob_path = os.path.join(self.annotations_file_path, idx)
-        blob = np.load(blob_path)["blob"]
-        blob = torch.tensor(blob, dtype=torch.float32)
+        filename = self.files[idx]
+
+        blob = self._get_blob(filename)
         coordinates, features = self._get_coords_feats(blob)
         return coordinates, features, label
-
 
 class CoordsDataset(BaseDataset):
     def __init__(self, *args, **kwargs):
@@ -215,8 +225,8 @@ def collation_fn_sparse(blobel):
         labels_batch.append(label)
 
     coords_batch = ME.utils.batched_coordinates(coords_batch)
-    feats_batch = torch.tensor(np.concatenate(feats_batch, 0), dtype=torch.float32)
-    labels_batch = torch.tensor(np.vstack(labels_batch), dtype=torch.float32)
+    feats_batch = torch.cat(feats_batch, 0)
+    labels_batch = torch.stack(labels_batch)
 
     return coords_batch, feats_batch, labels_batch
 

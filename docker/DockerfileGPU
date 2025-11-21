@@ -31,6 +31,9 @@ RUN pip install -U git+https://github.com/NVIDIA/MinkowskiEngine -v --no-deps \
                            --install-option="--force_cuda" \
                            --install-option="--blas=openblas"
 
+# Frame Average
+
+
 # Open3D for computing normals
 WORKDIR /
 RUN git clone https://github.com/isl-org/Open3D
