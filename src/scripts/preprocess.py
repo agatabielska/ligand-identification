@@ -6,18 +6,25 @@ import numpy as np
 import argparse
 
 
-def load_folder(folder_path: Path) -> Tuple[List[Path], List[int]]:
-    if not folder_path.exists():
-        raise ValueError(f"Folder not found: {folder_path}")
+def load_folder(folder_paths: list[Path]) -> Tuple[List[Path], List[int]]:
+    for folder_path in folder_paths:
+        if not folder_path.exists():
+            raise ValueError(f"Folder not found: {folder_path}")
 
     file_paths = []
     labels = []
-    class_dirs = [d for d in folder_path.iterdir() if d.is_dir()]
-    class_dirs = sorted(class_dirs, key=lambda x: x.name)
-    name_to_label = {d.name: idx for idx, d in enumerate(class_dirs)}
+    class_dirs = []
+    for folder_path in folder_paths:
+        class_dirs.extend(
+            [d for d in folder_path.iterdir() if d.is_dir() and not d.name.startswith(".")]
+        )
+
+    unique_class_names = sorted(list(set(d.name.split("/")[-1] for d in class_dirs)))
+    class_name_to_label = {name: idx for idx, name in enumerate(unique_class_names)}
+    dir_to_label = {d.name: class_name_to_label[d.name.split("/")[-1]] for d in class_dirs}
 
     for class_dir in class_dirs:
-        label = name_to_label[class_dir.name]
+        label = dir_to_label[class_dir.name]
         files = list(class_dir.glob("*.npz"))
         file_paths.extend(files)
         labels.extend([label] * len(files))
@@ -59,16 +66,16 @@ if __name__ == "__main__":
         description="Preprocess data and save it to a file."
     )
     parser.add_argument(
-        "--train-folder",
+        "--train-folders",
         type=str,
         required=True,
-        help="Path to the training data folder.",
+        help="List of paths to the training data folders. Folders should be comma separated.",
     )
     parser.add_argument(
-        "--test-folder",
+        "--test-folders",
         type=str,
         required=True,
-        help="Path to the testing data folder.",
+        help="List of paths to the testing data folders. Folders should be comma separated.",
     )
     parser.add_argument(
         "--chunk-size",
@@ -84,13 +91,13 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    train_folder = Path(args.train_folder)
-    test_folder = Path(args.test_folder)
+    train_folders = [Path(p.strip()) for p in args.train_folders.split(",")]
+    test_folders = [Path(p.strip()) for p in args.test_folders.split(",")]
     output_folder = Path(args.output_folder)
     output_folder.mkdir(parents=True, exist_ok=True)
 
-    train_files, train_labels = load_folder(train_folder)
-    test_files, test_labels = load_folder(test_folder)
+    train_files, train_labels = load_folder(train_folders)
+    test_files, test_labels = load_folder(test_folders)
 
     print(
         f"Found {len(train_files)} training files and {len(test_files)} testing files."
