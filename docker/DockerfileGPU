@@ -23,8 +23,9 @@ RUN apt-get install -y git ninja-build cmake build-essential libopenblas-dev \
 RUN apt-get clean
 RUN rm -rf /var/lib/apt/lists/*
 
-RUN pip install scikit-learn==1.0.2 pandas==1.3.5 torchmetrics==0.7.3 addict==2.4.0 yapf==0.32.0 neptune-client h5py wget
+RUN pip install scikit-learn==1.0.2 pandas==1.3.5 torchmetrics==0.7.3 addict==2.4.0 yapf==0.32.0 neptune-client h5py wget einops==0.8.0
 
+RUN pip install git+https://github.com/agatabielska/frame-averaging-pytorch.git
 # MinkowskiEngine for sparse NN operators
 ENV MAX_JOBS=4
 RUN pip install -U git+https://github.com/NVIDIA/MinkowskiEngine -v --no-deps \
