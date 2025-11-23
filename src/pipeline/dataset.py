@@ -1,4 +1,5 @@
 from torch.utils.data import Dataset
+from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
 from pathlib import Path
 import numpy as np
@@ -6,11 +7,14 @@ import torch
 
 
 class BlobDataset(Dataset):
-    def __init__(self, path: str, transform=None, cache: bool = False):
+    def __init__(
+        self, path: str, transform=None, cache: bool = False, num_workers: int = 4
+    ):
         self.path = Path(path)
         self.cache = cache
         self.transform = transform
         self.samples = []
+        self.num_workers = num_workers
         for class_dir in self.path.iterdir():
             if class_dir.is_dir():
                 for file in class_dir.glob("*.npz"):
@@ -18,8 +22,14 @@ class BlobDataset(Dataset):
 
         if self.cache:
             self.cached_data = []
-            for i in tqdm(range(self.__len__()), desc="Loading dataset into cache"):
-                self.cached_data.append(self._load_data(i))
+            with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
+                self.cached_data = list(
+                    tqdm(
+                        executor.map(self._load_data, range(self.__len__())),
+                        total=self.__len__(),
+                        desc="Loading dataset into cache",
+                    )
+                )
 
     def __len__(self):
         return len(self.samples)

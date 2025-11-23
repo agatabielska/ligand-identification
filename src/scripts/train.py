@@ -25,20 +25,24 @@ def transform(npz):
 @hydra.main(config_path="../../configs", config_name="config", version_base=None)
 def main(cfg: DictConfig):
     train_dataset = BlobDataset(
-        path="data/processed/train",
+        path=cfg.paths.train_data,
         transform=transform,
         cache=cfg.machine.cache_dataset,
+        num_workers=cfg.machine.num_workers,
     )
 
     val_dataset = BlobDataset(
-        path="data/processed/test", transform=transform, cache=cfg.machine.cache_dataset
+        path=cfg.paths.val_data,
+        transform=transform,
+        cache=cfg.machine.cache_dataset,
+        num_workers=cfg.machine.num_workers,
     )
 
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=cfg.machine.batch_size,
         shuffle=True,
-        num_workers=cfg.machine.num_workers,
+        num_workers=cfg.machine.num_workers if not cfg.machine.cache_dataset else 1,
         pin_memory=cfg.machine.pin_memory,
     )
 
@@ -46,13 +50,13 @@ def main(cfg: DictConfig):
         val_dataset,
         batch_size=cfg.machine.batch_size,
         shuffle=False,
-        num_workers=cfg.machine.num_workers,
+        num_workers=cfg.machine.num_workers if not cfg.machine.cache_dataset else 1,
         pin_memory=cfg.machine.pin_memory,
     )
 
     checkpoint_callback = ModelCheckpoint(
         monitor="val_loss",
-        dirpath="checkpoints/",
+        dirpath=cfg.paths.model_checkpoint,
         filename="model-{epoch:02d}-{val_loss:.2f}",
         mode="min",
     )
