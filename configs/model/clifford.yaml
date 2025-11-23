@@ -1,0 +1,7 @@
+type: clifford
+p: 3
+q: 0
+in_channels: 3
+hidden_channels: [32, 64, 128]
+n_shells: 3
+kernel_size: 3
