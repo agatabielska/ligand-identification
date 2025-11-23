@@ -7,7 +7,6 @@ from omegaconf import DictConfig
 import numpy as np
 import hydra
 import torch
-import sys
 
 
 def transform(npz):
@@ -25,9 +24,6 @@ def transform(npz):
 
 @hydra.main(config_path="../../configs", config_name="config", version_base=None)
 def main(cfg: DictConfig):
-    print(cfg)
-    sys.exit(0)
-
     train_dataset = BlobDataset(
         path="data/processed/train",
         transform=transform,
@@ -84,6 +80,7 @@ def main(cfg: DictConfig):
         raise ValueError(f"Unknown model type: {cfg.model.type}")
 
     trainer.fit(model, train_dataloader, val_dataloader)
+
 
 if __name__ == "__main__":
     main()
