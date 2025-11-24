@@ -1,4 +1,4 @@
-batch_size: 128
+batch_size: 8192
 num_workers: 64
 cache_dataset: true
 pin_memory: true

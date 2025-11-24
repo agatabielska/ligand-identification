@@ -1,9 +1,10 @@
 from src.models.clifford.model import CliffordSteerableNetwork
 from src.pipeline.dataset import BlobDataset
 from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import WandbLogger
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 import numpy as np
 import hydra
 import torch
@@ -24,6 +25,11 @@ def transform(npz):
 
 @hydra.main(config_path="../../configs", config_name="config", version_base=None)
 def main(cfg: DictConfig):
+    wandb_logger = WandbLogger(
+        project="ligand-identification",
+        config=OmegaConf.to_container(cfg, resolve=True),
+    )
+
     train_dataset = BlobDataset(
         path=cfg.paths.train_data,
         transform=transform,
@@ -67,6 +73,7 @@ def main(cfg: DictConfig):
         accelerator="auto",
         devices=cfg.machine.devices,
         log_every_n_steps=10,
+        logger=wandb_logger,
     )
 
     if cfg.model.type == "clifford":

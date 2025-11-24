@@ -10,3 +10,4 @@
 *.pth
 /checkpoints/
 /outputs/
+/lightning_logs/
