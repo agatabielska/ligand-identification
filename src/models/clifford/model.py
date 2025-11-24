@@ -1,3 +1,4 @@
+from src.utils.metrics import compute_metrics
 from typing import List, Optional
 import torch.nn.functional as F
 import pytorch_lightning as pl
@@ -459,41 +460,33 @@ class CliffordSteerableNetwork(pl.LightningModule):
         self.log("train_loss", loss)
         return loss
 
+
+
     def validation_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
-        loss = F.cross_entropy(y_hat, y)
-        pred = y_hat.argmax(dim=1)
-        acc = (pred == y).float().mean()
-        top_10_acc = sum(
-            [
-                1 if y[i] in torch.topk(y_hat[i], k=10).indices else 0
-                for i in range(y.size(0))
-            ]
-        ) / y.size(0)
+        metrics = compute_metrics(y_hat, y)
 
-        self.log("val_acc", acc)
-        self.log("val_top_10_acc", top_10_acc)
-        self.log("val_loss", loss)
-        return loss
+        self.log("val_loss", metrics["loss"])
+        self.log("val_acc", metrics["acc"])
+        self.log("val_top_10_acc", metrics["top_10_acc"])
+        self.log("val_brier_score", metrics["brier_score"])
+        self.log("val_macro_recall", metrics["macro_recall"])
+        self.log("val_mean_rank", metrics["mean_rank"])
+        return metrics["loss"]
 
     def test_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
-        loss = F.cross_entropy(y_hat, y)
-        pred = y_hat.argmax(dim=1)
-        acc = (pred == y).float().mean()
-        top_10_acc = sum(
-            [
-                1 if y[i] in torch.topk(y_hat[i], k=10).indices else 0
-                for i in range(y.size(0))
-            ]
-        ) / y.size(0)
+        metrics = compute_metrics(y_hat, y)
 
-        self.log("test_acc", acc)
-        self.log("test_top_10_acc", top_10_acc)
-        self.log("test_loss", loss)
-        return loss
+        self.log("test_loss", metrics["loss"])
+        self.log("test_acc", metrics["acc"])
+        self.log("test_top_10_acc", metrics["top_10_acc"])
+        self.log("test_brier_score", metrics["brier_score"])
+        self.log("test_macro_recall", metrics["macro_recall"])
+        self.log("test_mean_rank", metrics["mean_rank"])
+        return metrics["loss"]
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(
