@@ -1,0 +1,14 @@
+defaults:
+  - model: clifford
+  - machine: hpc
+  - _self_
+
+train:
+  epochs: 10
+  learning_rate: 1e-3
+  out_channels: 219
+
+paths:
+  train_data: data/processed/train
+  val_data: data/processed/test
+  model_checkpoint: checkpoints/
