@@ -3,14 +3,14 @@ from sklearn import metrics
 import numpy as np
 
 
-def compute_metrics(self, y_hat, y):
+def compute_metrics(y_hat, y, n_channels):
     loss = F.cross_entropy(y_hat, y).cpu().item()
     prob = F.softmax(y_hat, dim=1).cpu().numpy()
     y = y.squeeze().cpu().numpy()
     y_hat = y_hat.cpu().numpy()
 
     pred = y_hat.argmax(axis=1)
-    labels = np.arange(self.out_channels)
+    labels = np.arange(n_channels)
 
     ranks = []
     for true_label, scores in zip(y, y_hat):

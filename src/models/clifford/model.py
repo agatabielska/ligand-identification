@@ -465,7 +465,7 @@ class CliffordSteerableNetwork(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
-        metrics = compute_metrics(y_hat, y)
+        metrics = compute_metrics(y_hat, y, self.out_channels)
 
         self.log("val_loss", metrics["loss"])
         self.log("val_acc", metrics["acc"])
@@ -478,7 +478,7 @@ class CliffordSteerableNetwork(pl.LightningModule):
     def test_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
-        metrics = compute_metrics(y_hat, y)
+        metrics = compute_metrics(y_hat, y, self.out_channels)
 
         self.log("test_loss", metrics["loss"])
         self.log("test_acc", metrics["acc"])
