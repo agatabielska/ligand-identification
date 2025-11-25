@@ -1,5 +1,9 @@
-from src.utils.sampling_strategies import ProbabilisticSelectionTransform
-from concurrent.futures import ThreadPoolExecutor
+from utils.sampling_strategies import (
+    UniformSelectionTransform,
+    ProbabilisticSelectionTransform,
+    SpatialNormalization3,
+)
+from concurrent.futures import ThreadPoolExecutor, wait
 from typing import List, Tuple
 from pathlib import Path
 import numpy as np
@@ -16,12 +20,18 @@ def load_folder(folder_paths: list[Path]) -> Tuple[List[Path], List[int]]:
     class_dirs = []
     for folder_path in folder_paths:
         class_dirs.extend(
-            [d for d in folder_path.iterdir() if d.is_dir() and not d.name.startswith(".")]
+            [
+                d
+                for d in folder_path.iterdir()
+                if d.is_dir() and not d.name.startswith(".")
+            ]
         )
 
     unique_class_names = sorted(list(set(d.name.split("/")[-1] for d in class_dirs)))
     class_name_to_label = {name: idx for idx, name in enumerate(unique_class_names)}
-    dir_to_label = {d.name: class_name_to_label[d.name.split("/")[-1]] for d in class_dirs}
+    dir_to_label = {
+        d.name: class_name_to_label[d.name.split("/")[-1]] for d in class_dirs
+    }
 
     for class_dir in class_dirs:
         label = dir_to_label[class_dir.name]
@@ -33,10 +43,23 @@ def load_folder(folder_paths: list[Path]) -> Tuple[List[Path], List[int]]:
 
 
 def preprocess(
-    file_paths: List[Path], file_labels: List[int], output_path: Path
+    file_paths: List[Path],
+    file_labels: List[int],
+    output_path: Path,
+    transform_stack="probabilistic",
 ) -> None:
-    # TODO: Change this if needed
-    transform = ProbabilisticSelectionTransform(max_blob_size=2000)
+    if transform_stack == "uniform":
+        transforms = [UniformSelectionTransform(max_blob_size=2000, method="max")]
+    elif transform_stack == "probabilistic":
+        transforms = [ProbabilisticSelectionTransform(max_blob_size=2000)]
+    elif transform_stack == "normalization":
+        transforms = [
+            SpatialNormalization3(),
+            ProbabilisticSelectionTransform(max_blob_size=2000),
+        ]
+    else:
+        raise ValueError(f"Unknown transform stack: {transform_stack}")
+
     for file_path, label in zip(file_paths, file_labels):
         data = np.load(file_path)
         keys = list(data.keys())
@@ -46,7 +69,8 @@ def preprocess(
             )
 
         blob = data[keys[0]]
-        blob = transform.preprocess(blob)
+        for transform in transforms:
+            blob = transform.preprocess(blob)
         idx = np.argwhere(blob > 0)
         values = blob[blob > 0]
         processed_data = {"indices": idx, "values": values, "shape": blob.shape}
@@ -84,6 +108,12 @@ if __name__ == "__main__":
         help="Number of files to process in each chunk.",
     )
     parser.add_argument(
+        "--transform-stack",
+        type=str,
+        default="probabilistic",
+        help="Transform stack to apply during preprocessing.",
+    )
+    parser.add_argument(
         "--output-folder",
         type=str,
         required=True,
@@ -103,8 +133,26 @@ if __name__ == "__main__":
         f"Found {len(train_files)} training files and {len(test_files)} testing files."
     )
 
+    futures = []
     with ThreadPoolExecutor() as pool:
         for sublist, sublabels in chunk(train_files, train_labels, args.chunk_size):
-            pool.submit(preprocess, sublist, sublabels, output_folder / "train")
+            futures.append(
+                pool.submit(
+                    preprocess,
+                    sublist,
+                    sublabels,
+                    output_folder / "train",
+                    transform_stack=args.transform_stack,
+                )
+            )
         for sublist, sublabels in chunk(test_files, test_labels, args.chunk_size):
-            pool.submit(preprocess, sublist, sublabels, output_folder / "test")
+            futures.append(
+                pool.submit(
+                    preprocess,
+                    sublist,
+                    sublabels,
+                    output_folder / "test",
+                    transform_stack=args.transform_stack,
+                )
+            )
+    wait(futures)
