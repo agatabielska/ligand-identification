@@ -1,4 +1,4 @@
-from utils.sampling_strategies import (
+from src.utils.sampling_strategies import (
     UniformSelectionTransform,
     ProbabilisticSelectionTransform,
     SpatialNormalization3,
