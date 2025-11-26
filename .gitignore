@@ -8,3 +8,7 @@
 /.venv/
 **/__pycache__/
 *.pth
+/checkpoints/
+/outputs/
+/lightning_logs/
+/multirun/
