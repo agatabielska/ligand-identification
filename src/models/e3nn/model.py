@@ -2,8 +2,6 @@ import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 from e3nn.o3 import spherical_harmonics, Irreps, Linear
-from typing import Optional
-
 
 class E3NNPointCloudModel(pl.LightningModule):
     """E3NN model operating on point cloud representation of density."""
@@ -11,7 +9,6 @@ class E3NNPointCloudModel(pl.LightningModule):
     def __init__(
             self,
             num_classes: int,
-            max_points: int = 2000,
             learning_rate: float = 1e-3,
             weight_decay: float = 1e-4,
     ):
@@ -19,10 +16,8 @@ class E3NNPointCloudModel(pl.LightningModule):
         self.save_hyperparameters()
 
         self.num_classes = num_classes
-        self.max_points = max_points
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
-        self.lmax = 2
 
         # Define irreps structure
         self.irreps_in = Irreps("4x0e + 2x1o + 2x2e")

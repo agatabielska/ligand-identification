@@ -1,4 +1,9 @@
+import os
+import sys
+from pathlib import Path
+
 from src.models.clifford.model import CliffordSteerableNetwork
+from src.models.e3nn.model import E3NNPointCloudModel
 from src.pipeline.dataset import BlobDataset
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
@@ -10,7 +15,7 @@ import hydra
 import torch
 
 
-def transform(npz):
+def transform_clifford(npz):
     indices = npz["indices"]
     points = np.pad(
         indices,
@@ -22,9 +27,33 @@ def transform(npz):
     points = points.astype(np.float32)
     return torch.from_numpy(points)
 
+def transform_e3nn(npz):
+    indices = npz["indices"]
+    values = npz["values"]
+
+    coords = indices.astype(np.float32)
+    values = values.astype(np.float32)
+
+    points = np.column_stack([coords, values])
+    
+    current_points = points.shape[0]
+    
+    if current_points < 2000:
+        padding = np.zeros((2000 - current_points, 4), dtype=np.float32)
+        points = np.vstack([points, padding])
+     
+    return torch.from_numpy(points.astype(np.float32))
+
 
 @hydra.main(config_path="../../configs", config_name="config", version_base=None)
 def main(cfg: DictConfig):
+    if cfg.model.type == "clifford":
+        transform = transform_clifford
+    elif cfg.model.type == "e3nn":
+        transform = transform_e3nn
+    else:
+        raise ValueError(f"Unknown model type: {cfg.model.type}")
+    
     wandb_logger = WandbLogger(
         project="ligand-identification",
         config=OmegaConf.to_container(cfg, resolve=True),
@@ -87,6 +116,12 @@ def main(cfg: DictConfig):
             kernel_size=cfg.model.kernel_size,
             learning_rate=cfg.train.learning_rate,
         )
+    elif cfg.model.type == "e3nn":
+        model = E3NNPointCloudModel(
+        num_classes=cfg.train.out_channels,
+        learning_rate=cfg.train.learning_rate,
+        weight_decay=cfg.get('train', {}).get('weight_decay', 1e-4),
+    )
     else:
         raise ValueError(f"Unknown model type: {cfg.model.type}")
 
