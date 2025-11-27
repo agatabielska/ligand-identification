@@ -23,6 +23,25 @@ def transform(npz):
     return torch.from_numpy(points)
 
 
+def get_dataset(path: str, cfg, transform):
+    return BlobDataset(
+        path=path,
+        transform=transform,
+        cache=cfg.machine.cache_dataset,
+        num_workers=cfg.machine.num_workers,
+    )
+
+
+def get_dataloader(dataset, cfg, shuffle: bool):
+    return DataLoader(
+        dataset,
+        batch_size=cfg.machine.batch_size,
+        shuffle=shuffle,
+        num_workers=cfg.machine.num_workers if not cfg.machine.cache_dataset else 1,
+        pin_memory=cfg.machine.pin_memory,
+    )
+
+
 @hydra.main(config_path="../../configs", config_name="config", version_base=None)
 def main(cfg: DictConfig):
     wandb_logger = WandbLogger(
@@ -30,35 +49,13 @@ def main(cfg: DictConfig):
         config=OmegaConf.to_container(cfg, resolve=True),
     )
 
-    train_dataset = BlobDataset(
-        path=cfg.paths.train_data,
-        transform=transform,
-        cache=cfg.machine.cache_dataset,
-        num_workers=cfg.machine.num_workers,
-    )
+    train_dataset = get_dataset(cfg.paths.train_data, cfg, transform)
+    val_dataset = get_dataset(cfg.paths.val_data, cfg, transform)
+    test_dataset = get_dataset(cfg.paths.test_data, cfg, transform)
 
-    val_dataset = BlobDataset(
-        path=cfg.paths.val_data,
-        transform=transform,
-        cache=cfg.machine.cache_dataset,
-        num_workers=cfg.machine.num_workers,
-    )
-
-    train_dataloader = DataLoader(
-        train_dataset,
-        batch_size=cfg.machine.batch_size,
-        shuffle=True,
-        num_workers=cfg.machine.num_workers if not cfg.machine.cache_dataset else 1,
-        pin_memory=cfg.machine.pin_memory,
-    )
-
-    val_dataloader = DataLoader(
-        val_dataset,
-        batch_size=cfg.machine.batch_size,
-        shuffle=False,
-        num_workers=cfg.machine.num_workers if not cfg.machine.cache_dataset else 1,
-        pin_memory=cfg.machine.pin_memory,
-    )
+    train_dataloader = get_dataloader(train_dataset, cfg, shuffle=True)
+    val_dataloader = get_dataloader(val_dataset, cfg, shuffle=False)
+    test_dataloader = get_dataloader(test_dataset, cfg, shuffle=False)
 
     checkpoint_callback = ModelCheckpoint(
         monitor="val_loss",
@@ -91,6 +88,7 @@ def main(cfg: DictConfig):
         raise ValueError(f"Unknown model type: {cfg.model.type}")
 
     trainer.fit(model, train_dataloader, val_dataloader)
+    trainer.test(ckpt_path="best", dataloaders=test_dataloader)
 
 
 if __name__ == "__main__":
