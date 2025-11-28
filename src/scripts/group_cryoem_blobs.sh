@@ -9,6 +9,8 @@ HOLDOUT_FOLDS=(2)
 # Paths
 DATA_DIR="${SCRIPT_DIR}../../data"
 SOURCE_DIR="${SCRIPT_DIR}../../data/cryoem_blobs"
+
+# Here name of output directories can be changed
 TRAIN_DIR="${SOURCE_DIR}/train"
 HOLDOUT_DIR="${SOURCE_DIR}/holdout"
 
