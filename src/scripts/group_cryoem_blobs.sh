@@ -1,12 +1,8 @@
 #!/usr/bin/bash
-
 # CryoEM Ligand File Organizer by Fold
-
 SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/"
 
-# ============================================================
-# CONFIGURATION: Set which folds are train vs holdout
-# ============================================================
+# Here define which folds go to training and which to holdout
 TRAIN_FOLDS=(0 1)
 HOLDOUT_FOLDS=(2)
 
@@ -59,48 +55,38 @@ for fold in 0 1 2; do
     
     echo -e "\n${BLUE}Processing fold${fold}.csv -> ${DEST_TYPE}/${NC}"
     
-    MOVED=0
-    SKIPPED=0
-    ERRORS=0
-    
-    # Read CSV line by line (skip header)
-    tail -n +2 "$CSV_FILE" | while IFS=',' read -r ligand_group filename; do
+    # Process in parallel with xargs
+    tail -n +2 "$CSV_FILE" | xargs -P 16 -I {} bash -c '
+        IFS="," read -r ligand_group filename <<< "{}"
+        
         # Clean up fields
-        ligand_group=$(echo "$ligand_group" | sed 's/^[ \t\r\n"]*//;s/[ \t\r\n"]*$//')
-        filename=$(echo "$filename" | sed 's/^[ \t\r\n"]*//;s/[ \t\r\n"]*$//')
+        ligand_group=$(echo "$ligand_group" | sed "s/^[ \t\r\n\"]*//;s/[ \t\r\n\"]*$//")
+        filename=$(echo "$filename" | sed "s/^[ \t\r\n\"]*//;s/[ \t\r\n\"]*$//")
         
         # Skip empty lines
-        [[ -z "$filename" || -z "$ligand_group" ]] && continue
+        [[ -z "$filename" || -z "$ligand_group" ]] && exit 0
         
         # Full path to source file
-        SOURCE_FILE="${SOURCE_DIR}/${filename}"
+        SOURCE_FILE="'"$SOURCE_DIR"'/${filename}"
         
         # Check if file exists
-        if [[ ! -f "$SOURCE_FILE" ]]; then
-            ((SKIPPED++))
-            continue
-        fi
+        [[ ! -f "$SOURCE_FILE" ]] && exit 0
         
         # Sanitize group name for folder
-        safe_group=$(echo "$ligand_group" | tr '/' '_' | tr '\\' '_')
+        safe_group=$(echo "$ligand_group" | tr "/" "_" | tr "\\\\" "_")
         
         # Create destination folder if needed
-        GROUP_DIR="${DEST_DIR}/${safe_group}"
+        GROUP_DIR="'"$DEST_DIR"'/${safe_group}"
         mkdir -p "$GROUP_DIR"
         
         # Move file
         DEST_FILE="${GROUP_DIR}/${filename}"
-        if mv "$SOURCE_FILE" "$DEST_FILE" 2>/dev/null; then
-            ((MOVED++))
-        else
-            ((ERRORS++))
-        fi
-    done
+        mv "$SOURCE_FILE" "$DEST_FILE" 2>/dev/null
+    '
     
- 
+    echo -e "${GREEN}✓ Fold ${fold} complete${NC}"
 done
 
 echo -e "\n${GREEN}✓ Complete${NC}"
 echo "======================="
-
 exit 0
