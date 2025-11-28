@@ -14,9 +14,9 @@ uv run streamlit run src/visualizations/blob_visualization.py
 ```
 
 # To prepare data for the model
-### Download ligand groups mapping, xray training and holdout mapping
+### Download xray training and holdout mapping
 ```bash
-./src/scripts/download_ligand_mapping.sh
+./src/scripts/download_xray_mapping.sh
 ```
 ### Download and unpack blobs
 X-ray:
