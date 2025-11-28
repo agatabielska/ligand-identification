@@ -21,7 +21,7 @@ if [ ! -f "${data_dir}/blobs_full.tar.gz" ]; then
 fi
 
 echo "Extracting blobs_full.tar.gz..."
-tar -xvzf "${data_dir}/blobs_full.tar.gz" -C "${data_dir}"
+tar -xzf "${data_dir}/blobs_full.tar.gz" -C "${data_dir}"
 
 extracted_dir="$(tar -tzf "${data_dir}/blobs_full.tar.gz" | head -1 | cut -d'/' -f1)"
 
