@@ -3,23 +3,24 @@ import torch.nn as nn
 import pytorch_lightning as pl
 from e3nn.o3 import spherical_harmonics, Irreps, Linear
 
+
 class E3NNPointCloudModel(pl.LightningModule):
-    """E3NN model operating on point cloud representation of density."""
+    """E3NN model with properly structured irreps."""
 
     def __init__(
-            self,
-            num_classes: int,
-            learning_rate: float = 1e-3,
-            weight_decay: float = 1e-4,
+        self,
+        num_classes: int,
+        learning_rate: float = 1e-3,
+        weight_decay: float = 1e-4,
     ):
         super().__init__()
         self.save_hyperparameters()
-
         self.num_classes = num_classes
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
 
-        # Define irreps structure
+        # Define irreps structure - PROPERLY STRUCTURED
+        # 4 scalars + 2 vectors (6 components) + 2 rank-2 tensors (10 components) = 20 total
         self.irreps_in = Irreps("4x0e + 2x1o + 2x2e")
         self.irreps_hidden1 = Irreps("32x0e + 8x1o + 4x2e")
         self.irreps_hidden2 = Irreps("64x0e + 8x1o + 4x2e")
@@ -34,7 +35,7 @@ class E3NNPointCloudModel(pl.LightningModule):
 
         # Classifier with dropout
         self.dropout = nn.Dropout(0.1)
-        self.fc1 = nn.Linear(768, 256)  # 768 from multi-scale pooling
+        self.fc1 = nn.Linear(768, 256)
         self.fc2 = nn.Linear(256, 128)
         self.fc3 = nn.Linear(128, num_classes)
 
@@ -43,20 +44,27 @@ class E3NNPointCloudModel(pl.LightningModule):
 
     def compute_point_features(self, points, density_values):
         """
-        VECTORIZED computation of rotation-equivariant features.
-
+        PROPERLY STRUCTURED computation of rotation-equivariant features.
+        
+        Returns features in the correct irreps order:
+        - 4x0e: 4 scalar features
+        - 2x1o: 2 vector features (each is 3 components)
+        - 2x2e: 2 rank-2 tensor features (each is 5 components)
+        
         Args:
             points: (B, N, 3) normalized coordinates
             density_values: (B, N) scalar density at each point
 
         Returns:
-            features: (B, N, 20) equivariant features
+            features: (B, N, 20) properly structured equivariant features
         """
         B, N, _ = points.shape
 
         # Compute center of mass per sample (vectorized)
         vals_sum = density_values.sum(dim=1, keepdim=True).clamp(min=1e-8)
-        com = (points * density_values.unsqueeze(-1)).sum(dim=1, keepdim=True) / vals_sum.unsqueeze(-1)
+        com = (points * density_values.unsqueeze(-1)).sum(
+            dim=1, keepdim=True
+        ) / vals_sum.unsqueeze(-1)
 
         # Center points around COM
         centered_pts = points - com
@@ -71,37 +79,46 @@ class E3NNPointCloudModel(pl.LightningModule):
         sh_l1 = spherical_harmonics(1, dirs_flat, normalize=True).reshape(B, N, 3)
         sh_l2 = spherical_harmonics(2, dirs_flat, normalize=True).reshape(B, N, 5)
 
-        # Scalar features (4x0e = 4 scalars)
+        # ===== SCALARS (4x0e = 4 channels) =====
         density = density_values.unsqueeze(-1)
         log_r = torch.log1p(r_safe)
         density_r = density * r_safe
+        
+        scalars = torch.cat([
+            density,      # scalar 1
+            r_safe,       # scalar 2
+            log_r,        # scalar 3
+            density_r,    # scalar 4
+        ], dim=-1)  # Shape: (B, N, 4)
 
-        scalar_features = torch.cat([
-            density,
-            r_safe,
-            log_r,
-            density_r,
-        ], dim=-1)
+        # ===== VECTORS (2x1o = 2 vectors × 3 components = 6 channels) =====
+        # Each vector must be 3 consecutive components
+        vector1 = directions  # First vector (3 components)
+        vector2 = sh_l1       # Second vector (3 components)
+        
+        vectors = torch.cat([
+            vector1,  # components 0,1,2 of first vector
+            vector2,  # components 0,1,2 of second vector
+        ], dim=-1)  # Shape: (B, N, 6)
 
-        # Vector features (2x1o = 2 vectors * 3 components = 6 features)
-        vector_features = torch.cat([
-            directions,
-            sh_l1
-        ], dim=-1)
+        # ===== RANK-2 TENSORS (2x2e = 2 tensors × 5 components = 10 channels) =====
+        # Each rank-2 tensor has 5 components (spherical harmonics l=2)
+        tensor1 = sh_l2                    # First tensor (5 components)
+        tensor2 = sh_l2 * density          # Second tensor (5 components, weighted by density)
+        
+        tensors = torch.cat([
+            tensor1,  # components 0,1,2,3,4 of first tensor
+            tensor2,  # components 0,1,2,3,4 of second tensor
+        ], dim=-1)  # Shape: (B, N, 10)
 
-        # Tensor features (2x2e = 2 tensors * 5 components = 10 features)
-        tensor_features = torch.cat([
-            sh_l2,
-            sh_l2 * density
-        ], dim=-1)
-
-        # Concatenate: 4 + 6 + 10 = 20 features
+        # ===== FINAL CONCATENATION IN IRREPS ORDER =====
+        # CRITICAL: Must be in order specified by irreps_in: "4x0e + 2x1o + 2x2e"
         point_features = torch.cat([
-            scalar_features,
-            vector_features,
-            tensor_features
-        ], dim=-1)
-
+            scalars,   # 4 channels (indices 0-3)
+            vectors,   # 6 channels (indices 4-9)
+            tensors    # 10 channels (indices 10-19)
+        ], dim=-1)  # Shape: (B, N, 20)
+        
         return point_features
 
     def forward(self, x):
@@ -118,7 +135,7 @@ class E3NNPointCloudModel(pl.LightningModule):
         points = x[:, :, :3]
         density_values = x[:, :, 3]
 
-        # Compute equivariant features
+        # Compute equivariant features with PROPER irreps structure
         point_features = self.compute_point_features(points, density_values)
 
         # Pass through E3NN layers
@@ -151,17 +168,14 @@ class E3NNPointCloudModel(pl.LightningModule):
         pred = output.argmax(dim=1)
         acc = (pred == target).float().mean()
 
-        # Calculate top-10 accuracy
+        # Calculate top-10 accuracy (vectorized)
         top_10 = output.topk(10, dim=1).indices
-        top_10_acc = torch.tensor([
-            1.0 if target[i] in top_10[i] else 0.0
-            for i in range(target.size(0))
-        ]).mean()
+        top_10_acc = (top_10 == target.unsqueeze(1)).any(dim=1).float().mean()
 
         # Log metrics
-        self.log('train_loss', loss, prog_bar=True)
-        self.log('train_acc', acc, prog_bar=True)
-        self.log('train_top_10_acc', top_10_acc)
+        self.log("train_loss", loss, prog_bar=True)
+        self.log("train_acc", acc, prog_bar=True)
+        self.log("train_top_10_acc", top_10_acc)
 
         return loss
 
@@ -174,38 +188,45 @@ class E3NNPointCloudModel(pl.LightningModule):
         pred = output.argmax(dim=1)
         acc = (pred == target).float().mean()
 
-        # Calculate top-10 accuracy
+        # Calculate top-10 accuracy (vectorized)
         top_10 = output.topk(10, dim=1).indices
-        top_10_acc = torch.tensor([
-            1.0 if target[i] in top_10[i] else 0.0
-            for i in range(target.size(0))
-        ]).mean()
+        top_10_acc = (top_10 == target.unsqueeze(1)).any(dim=1).float().mean()
 
         # Log metrics
-        self.log('val_loss', loss, prog_bar=True)
-        self.log('val_acc', acc, prog_bar=True)
-        self.log('val_top_10_acc', top_10_acc)
+        self.log("val_loss", loss, prog_bar=True)
+        self.log("val_acc", acc, prog_bar=True)
+        self.log("val_top_10_acc", top_10_acc)
+
+        return loss
+
+    def test_step(self, batch, batch_idx):
+        data, target = batch
+        output = self(data)
+        loss = self.criterion(output, target)
+
+        # Calculate accuracy
+        pred = output.argmax(dim=1)
+        acc = (pred == target).float().mean()
+
+        # Calculate top-10 accuracy (vectorized)
+        top_10 = output.topk(10, dim=1).indices
+        top_10_acc = (top_10 == target.unsqueeze(1)).any(dim=1).float().mean()
+
+        # Log metrics
+        self.log("test_loss", loss, prog_bar=True)
+        self.log("test_acc", acc, prog_bar=True)
+        self.log("test_top_10_acc", top_10_acc)
 
         return loss
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(
-            self.parameters(),
-            lr=self.learning_rate,
-            weight_decay=self.weight_decay
+            self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay
         )
-
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer,
-            mode='min',
-            factor=0.5,
-            patience=5
+            optimizer, mode="min", factor=0.5, patience=5
         )
-
         return {
-            'optimizer': optimizer,
-            'lr_scheduler': {
-                'scheduler': scheduler,
-                'monitor': 'val_loss'
-            }
+            "optimizer": optimizer,
+            "lr_scheduler": {"scheduler": scheduler, "monitor": "val_loss"},
         }

@@ -4,13 +4,15 @@ from src.utils.sampling_strategies import (
     SpatialNormalization3,
 )
 from concurrent.futures import ThreadPoolExecutor, wait
+from sklearn.model_selection import train_test_split
+from collections import Counter
 from typing import List, Tuple
 from pathlib import Path
 import numpy as np
 import argparse
 
 
-def load_folder(folder_paths: list[Path]) -> Tuple[List[Path], List[int]]:
+def load_folder(folder_paths: List[Path]) -> Tuple[List[Path], List[int]]:
     for folder_path in folder_paths:
         if not folder_path.exists():
             raise ValueError(f"Folder not found: {folder_path}")
@@ -85,6 +87,29 @@ def chunk(items, labels, size):
         yield items[i : i + size], labels[i : i + size]
 
 
+def handle_single_example(
+    file_paths: List[Path], file_labels: List[int], strategy: str = "remove"
+) -> Tuple[List[Path], List[int]]:
+    new_paths = []
+    new_labels = []
+    counter = Counter(file_labels)
+
+    for path, label in zip(file_paths, file_labels):
+        if counter[label] == 1:
+            print(f"Class {label} has a single example: {path}")
+            if strategy == "remove":
+                continue
+            elif strategy == "duplicate":
+                new_paths.append(path)
+                new_labels.append(label)
+            else:
+                raise ValueError(f"Unknown strategy: {strategy}")
+        new_paths.append(path)
+        new_labels.append(label)
+
+    return new_paths, new_labels
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Preprocess data and save it to a file."
@@ -119,6 +144,16 @@ if __name__ == "__main__":
         required=True,
         help="Path to the output folder where preprocessed data will be saved.",
     )
+    parser.add_argument(
+        "--test-size", type=float, default=0.2, help="Proportion of test data."
+    )
+    parser.add_argument(
+        "--single-example-strategy",
+        type=str,
+        choices=["remove", "duplicate"],
+        default="remove",
+        help="Strategy to handle classes with a single example.",
+    )
     args = parser.parse_args()
 
     train_folders = [Path(p.strip()) for p in args.train_folders.split(",")]
@@ -129,8 +164,20 @@ if __name__ == "__main__":
     train_files, train_labels = load_folder(train_folders)
     test_files, test_labels = load_folder(test_folders)
 
+    train_files, train_labels = handle_single_example(
+        train_files, train_labels, strategy=args.single_example_strategy
+    )
+
+    train_files, val_files, train_labels, val_labels = train_test_split(
+        train_files,
+        train_labels,
+        test_size=args.test_size,
+        stratify=train_labels,
+        random_state=42,
+    )
+
     print(
-        f"Found {len(train_files)} training files and {len(test_files)} testing files."
+        f"Found {len(train_files)} training files {len(val_files)} validation files and {len(test_files)} testing files."
     )
 
     futures = []
@@ -142,6 +189,16 @@ if __name__ == "__main__":
                     sublist,
                     sublabels,
                     output_folder / "train",
+                    transform_stack=args.transform_stack,
+                )
+            )
+        for sublist, sublabels in chunk(val_files, val_labels, args.chunk_size):
+            futures.append(
+                pool.submit(
+                    preprocess,
+                    sublist,
+                    sublabels,
+                    output_folder / "val",
                     transform_stack=args.transform_stack,
                 )
             )
