@@ -14,6 +14,7 @@ from data import SparseDataset, dataset_split, collation_fn_sparse
 from tqdm import tqdm
 
 
+
 def seed_worker(worker_id):
     worker_seed = torch.initial_seed() % 2 ** 32
     np.random.seed(worker_seed)
@@ -51,6 +52,7 @@ if __name__ == "__main__":
                                  shuffle=True)
 
     model = models.create(cfg["model"])
+    print(model)
     model.to(device)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(cfg["lr"]), weight_decay=float(cfg["weight_decay"]))

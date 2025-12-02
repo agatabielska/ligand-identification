@@ -1,7 +1,7 @@
 accum_iter: 1
 batch_size: 256
-dataset_dir: ../data/blobs_uniform_2000_max
-dataset_file: ../data/train.csv
+dataset_dir: ../data/cryoem_blobs_uniform_2000_max
+dataset_file: ../data/merged.csv
 dataset_max_size: null
 dataset_min_size: null
 device: cuda

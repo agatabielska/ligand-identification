@@ -1,6 +1,6 @@
 batch_size: 64
-dataset_dir: ../data/blobs_uniform_2000_max
-dataset_file: ../data/holdout.csv
+dataset_dir: ../data/cryoem_blobs_uniform_2000_max
+dataset_file: ../data/fold2.csv
 device: cuda
 model_epoch: 6
 model_name: MinkLoc3D
