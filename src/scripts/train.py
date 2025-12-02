@@ -107,13 +107,14 @@ def main(cfg: DictConfig):
             n_shells=cfg.model.n_shells,
             kernel_size=cfg.model.kernel_size,
             learning_rate=cfg.train.learning_rate,
+            weight_decay=cfg.train.weight_decay,
         )
 
     elif cfg.model.type == "e3nn":
         model = E3NNPointCloudModel(
             num_classes=cfg.train.out_channels,
             learning_rate=cfg.train.learning_rate,
-            weight_decay=cfg.train.get("weight_decay", 1e-4),
+            weight_decay=cfg.train.weight_decay,
         )
     else:
         raise ValueError(f"Unknown model type: {cfg.model.type}")

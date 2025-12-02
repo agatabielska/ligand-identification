@@ -1,5 +1,1 @@
 type: e3nn
-num_classes: 219
-max_points: 2000
-learning_rate: 1e-3
-weight_decay: 1e-4
