@@ -12,36 +12,40 @@ import numpy as np
 import argparse
 
 
-def load_folder(folder_paths: List[Path]) -> Tuple[List[Path], List[int]]:
-    for folder_path in folder_paths:
+def load_folders(
+    train_folder_path: Path, test_folder_path: Path
+) -> Tuple[List[Path], List[int], List[Path], List[int]]:
+    for folder_path in [train_folder_path, test_folder_path]:
         if not folder_path.exists():
             raise ValueError(f"Folder not found: {folder_path}")
 
-    file_paths = []
-    labels = []
-    class_dirs = []
-    for folder_path in folder_paths:
-        class_dirs.extend(
-            [
-                d
-                for d in folder_path.iterdir()
-                if d.is_dir() and not d.name.startswith(".")
-            ]
-        )
+    train_class_dirs = [d for d in train_folder_path.iterdir() if d.is_dir()]
+    test_class_dirs = [d for d in test_folder_path.iterdir() if d.is_dir()]
 
-    unique_class_names = sorted(list(set(d.name.split("/")[-1] for d in class_dirs)))
+    unique_class_names = set()
+    unique_class_names.update([d.name for d in train_class_dirs])
+    unique_class_names.update([d.name for d in test_class_dirs])
+    unique_class_names = list(sorted(unique_class_names))
+
     class_name_to_label = {name: idx for idx, name in enumerate(unique_class_names)}
-    dir_to_label = {
-        d.name: class_name_to_label[d.name.split("/")[-1]] for d in class_dirs
-    }
 
-    for class_dir in class_dirs:
-        label = dir_to_label[class_dir.name]
+    train_files = []
+    train_labels = []
+    for class_dir in train_class_dirs:
+        label = class_name_to_label[class_dir.name]
         files = list(class_dir.glob("*.npz"))
-        file_paths.extend(files)
-        labels.extend([label] * len(files))
+        train_files.extend(files)
+        train_labels.extend([label] * len(files))
 
-    return file_paths, labels
+    test_files = []
+    test_labels = []
+    for class_dir in test_class_dirs:
+        label = class_name_to_label[class_dir.name]
+        files = list(class_dir.glob("*.npz"))
+        test_files.extend(files)
+        test_labels.extend([label] * len(files))
+
+    return train_files, train_labels, test_files, test_labels
 
 
 def preprocess(
@@ -115,16 +119,16 @@ if __name__ == "__main__":
         description="Preprocess data and save it to a file."
     )
     parser.add_argument(
-        "--train-folders",
+        "--train-folder",
         type=str,
         required=True,
-        help="List of paths to the training data folders. Folders should be comma separated.",
+        help="Path to the training data folder.",
     )
     parser.add_argument(
-        "--test-folders",
+        "--test-folder",
         type=str,
         required=True,
-        help="List of paths to the testing data folders. Folders should be comma separated.",
+        help="Path to the testing data folder.",
     )
     parser.add_argument(
         "--chunk-size",
@@ -156,13 +160,12 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    train_folders = [Path(p.strip()) for p in args.train_folders.split(",")]
-    test_folders = [Path(p.strip()) for p in args.test_folders.split(",")]
     output_folder = Path(args.output_folder)
     output_folder.mkdir(parents=True, exist_ok=True)
 
-    train_files, train_labels = load_folder(train_folders)
-    test_files, test_labels = load_folder(test_folders)
+    train_files, train_labels, test_files, test_labels = load_folders(
+        Path(args.train_folder), Path(args.test_folder)
+    )
 
     train_files, train_labels = handle_single_example(
         train_files, train_labels, strategy=args.single_example_strategy
