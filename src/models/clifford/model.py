@@ -456,16 +456,23 @@ class CliffordSteerableNetwork(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
+        
+        # Computing the loss separately, since compute_metrics won't pass the gradient
         loss = F.cross_entropy(y_hat, y)
+        metrics = compute_metrics(y_hat, y, self.out_channels)
+
         self.log("train_loss", loss)
+        self.log("train_acc", metrics["acc"])
+        self.log("train_top_10_acc", metrics["top_10_acc"])
+        self.log("train_brier_score", metrics["brier_score"])
+        self.log("train_macro_recall", metrics["macro_recall"])
+        self.log("train_mean_rank", metrics["mean_rank"])
         return loss
-
-
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
-        metrics = compute_metrics(y_hat, y)
+        metrics = compute_metrics(y_hat, y, self.out_channels)
 
         self.log("val_loss", metrics["loss"])
         self.log("val_acc", metrics["acc"])
@@ -478,7 +485,7 @@ class CliffordSteerableNetwork(pl.LightningModule):
     def test_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
-        metrics = compute_metrics(y_hat, y)
+        metrics = compute_metrics(y_hat, y, self.out_channels)
 
         self.log("test_loss", metrics["loss"])
         self.log("test_acc", metrics["acc"])

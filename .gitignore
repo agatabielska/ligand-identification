@@ -2,7 +2,6 @@
 *.npz
 
 /data/*.npz
-/data/*.csv
 /data/*.zip
 /data/*.tar*
 /.venv/
@@ -11,3 +10,5 @@
 /checkpoints/
 /outputs/
 /lightning_logs/
+/multirun/
+/wandb/

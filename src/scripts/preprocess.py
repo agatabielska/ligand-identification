@@ -145,7 +145,7 @@ if __name__ == "__main__":
         help="Path to the output folder where preprocessed data will be saved.",
     )
     parser.add_argument(
-        "--test-size", type=float, default=0.2, help="Proportion of test data."
+        "--test-size", type=float, default=0.25, help="Proportion of test data."
     )
     parser.add_argument(
         "--single-example-strategy",
@@ -177,7 +177,7 @@ if __name__ == "__main__":
     )
 
     print(
-        f"Found {len(train_files)} training files {len(val_files)} validation files and {len(test_files)} testing files."
+        f"Found {len(train_files)} training files and {len(test_files)} testing files."
     )
 
     futures = []
