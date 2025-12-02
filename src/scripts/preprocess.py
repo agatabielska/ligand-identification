@@ -13,14 +13,19 @@ import argparse
 
 
 def load_folders(
-    train_folder_path: Path, test_folder_path: Path
+    train_folder_paths: list[Path], test_folder_paths: list[Path]
 ) -> Tuple[List[Path], List[int], List[Path], List[int]]:
-    for folder_path in [train_folder_path, test_folder_path]:
+    for folder_path in [*train_folder_paths, *test_folder_paths]:
         if not folder_path.exists():
             raise ValueError(f"Folder not found: {folder_path}")
 
-    train_class_dirs = [d for d in train_folder_path.iterdir() if d.is_dir()]
-    test_class_dirs = [d for d in test_folder_path.iterdir() if d.is_dir()]
+    train_class_dirs = []
+    for train_folder_path in train_folder_paths:
+        train_class_dirs.extend([d for d in train_folder_path.iterdir() if d.is_dir()])
+        
+    test_class_dirs = []
+    for test_folder_path in test_folder_paths:
+        test_class_dirs.extend([d for d in test_folder_path.iterdir() if d.is_dir()])
 
     unique_class_names = set()
     unique_class_names.update([d.name for d in train_class_dirs])
@@ -119,16 +124,18 @@ if __name__ == "__main__":
         description="Preprocess data and save it to a file."
     )
     parser.add_argument(
-        "--train-folder",
+        "--train-folders",
         type=str,
         required=True,
-        help="Path to the training data folder.",
+        help="Paths to training data folders.",
+        nargs="+",
     )
     parser.add_argument(
-        "--test-folder",
+        "--test-folders",
         type=str,
         required=True,
-        help="Path to the testing data folder.",
+        help="Paths to testing data folders.",
+        nargs="+",
     )
     parser.add_argument(
         "--chunk-size",
@@ -164,7 +171,7 @@ if __name__ == "__main__":
     output_folder.mkdir(parents=True, exist_ok=True)
 
     train_files, train_labels, test_files, test_labels = load_folders(
-        Path(args.train_folder), Path(args.test_folder)
+        [Path(path) for path in args.train_folders], [Path(path) for path in args.test_folders]
     )
 
     train_files, train_labels = handle_single_example(
