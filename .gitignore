@@ -11,3 +11,4 @@
 /outputs/
 /lightning_logs/
 /multirun/
+/wandb/
