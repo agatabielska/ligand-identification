@@ -8,11 +8,12 @@ import torch
 
 class BlobDataset(Dataset):
     def __init__(
-        self, path: str, transform=None, cache: bool = False, num_workers: int = 4
+        self, path: str, transform=None, normalize=False, cache: bool = False, num_workers: int = 4
     ):
         self.path = Path(path)
         self.cache = cache
         self.transform = transform
+        self.normalize = normalize
         self.samples = []
         self.num_workers = num_workers
         for class_dir in self.path.iterdir():
@@ -33,10 +34,24 @@ class BlobDataset(Dataset):
 
     def __len__(self):
         return len(self.samples)
+    
+    @staticmethod
+    def pc_normalize(pc: np.ndarray) -> np.ndarray:
+        """Normalize the coordinates of the blob to be centered at the origin and fit within a unit sphere."""
+        centroid = np.mean(pc, axis=0)
+        pc = pc - centroid
+        m = np.max(np.linalg.norm(pc, axis=1))
+        return pc / m
 
     def _load_data(self, idx):
         file_path, label = self.samples[idx]
         npz = np.load(file_path)
+
+        # Convert to dict so that we can modify it in place
+        npz = dict(npz)
+
+        if self.normalize:
+            npz["indices"] = self.pc_normalize(npz["indices"])
 
         if self.transform is None:
             idx = npz["indices"]

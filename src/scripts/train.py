@@ -27,6 +27,7 @@ def get_dataset(path: str, cfg, transform):
     return BlobDataset(
         path=path,
         transform=transform,
+        normalize=cfg.train.normalize_data,
         cache=cfg.machine.cache_dataset,
         num_workers=cfg.machine.num_workers,
     )
