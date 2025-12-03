@@ -1,7 +1,9 @@
 from src.models.clifford.model import CliffordSteerableNetwork
 from src.models.e3nn.model import E3NNPointCloudModel
+from src.models.e3nn.improved_model import ImprovedE3NNModel
+from src.models.e3nn.simple_upgraded import SimpleUpgradedE3NN
 from src.pipeline.dataset import BlobDataset
-from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
 from pytorch_lightning.loggers import WandbLogger
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
@@ -9,6 +11,7 @@ from omegaconf import DictConfig, OmegaConf
 import numpy as np
 import hydra
 import torch
+
 
 
 def transform_clifford(npz):
@@ -56,14 +59,15 @@ def get_dataloader(dataset, cfg, shuffle: bool):
         shuffle=shuffle,
         num_workers=cfg.machine.num_workers if not cfg.machine.cache_dataset else 1,
         pin_memory=cfg.machine.pin_memory,
+        persistent_workers=True if cfg.machine.num_workers > 0 else False,
     )
 
 
 @hydra.main(config_path="../../configs", config_name="config", version_base=None)
-def main(cfg: DictConfig):
+def main(cfg: DictConfig):  
     if cfg.model.type == "clifford":
         transform = transform_clifford
-    elif cfg.model.type == "e3nn":
+    elif cfg.model.type in ["e3nn", "e3nn_improved", "e3nn_simple"]:
         transform = transform_e3nn
     else:
         raise ValueError(f"Unknown model type: {cfg.model.type}")
@@ -86,16 +90,28 @@ def main(cfg: DictConfig):
         dirpath=cfg.paths.model_checkpoint,
         filename="model-{epoch:02d}-{val_loss:.2f}",
         mode="min",
+        save_top_k=3,
+        save_last=True,
     )
+    
+    early_stopping = EarlyStopping(
+        monitor="val_loss",
+        patience=15,
+        mode="min",
+        verbose=True,
+    )
+    
+    lr_monitor = LearningRateMonitor(logging_interval="epoch")
 
     trainer = pl.Trainer(
         max_epochs=cfg.train.epochs,
-        callbacks=[checkpoint_callback],
+        callbacks=[checkpoint_callback, early_stopping, lr_monitor],
         accelerator="auto",
         devices=cfg.machine.devices,
         log_every_n_steps=10,
         logger=wandb_logger,
     )
+
 
     if cfg.model.type == "clifford":
         model = CliffordSteerableNetwork(
@@ -116,12 +132,29 @@ def main(cfg: DictConfig):
             learning_rate=cfg.train.learning_rate,
             weight_decay=cfg.train.weight_decay,
         )
+        
+    elif cfg.model.type == "e3nn_simple":
+        model = SimpleUpgradedE3NN(
+            num_classes=cfg.train.out_channels,
+            learning_rate=cfg.train.learning_rate,
+            weight_decay=cfg.train.weight_decay,
+        )
+        
+    elif cfg.model.type == "e3nn_improved":
+        model = ImprovedE3NNModel(
+            num_classes=cfg.train.out_channels,
+            max_neighbors=cfg.model.get("max_neighbors", 32),
+            cutoff_radius=cfg.model.get("cutoff_radius", 5.0),
+            num_layers=cfg.model.get("num_layers", 3),
+            learning_rate=cfg.train.learning_rate,
+            weight_decay=cfg.train.weight_decay,
+        )
     else:
         raise ValueError(f"Unknown model type: {cfg.model.type}")
 
     trainer.fit(model, train_dataloader, val_dataloader)
-    trainer.test(ckpt_path="best", dataloaders=test_dataloader)
 
+    trainer.test(ckpt_path="best", dataloaders=test_dataloader)
 
 if __name__ == "__main__":
     main()
