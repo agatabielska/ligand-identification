@@ -136,7 +136,7 @@ class E3NNPointCloudModel(pl.LightningModule):
 
         # Computing the loss separately, since compute_metrics won't pass the gradient
         loss = F.cross_entropy(y_hat, y)
-        metrics = compute_metrics(y_hat, y, self.out_channels)
+        metrics = compute_metrics(y_hat, y, self.num_classes)
 
         self.log("train_loss", loss)
         self.log("train_acc", metrics["acc"])
@@ -149,7 +149,7 @@ class E3NNPointCloudModel(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
-        metrics = compute_metrics(y_hat, y, self.out_channels)
+        metrics = compute_metrics(y_hat, y, self.num_classes)
 
         self.log("val_loss", metrics["loss"])
         self.log("val_acc", metrics["acc"])
@@ -162,7 +162,7 @@ class E3NNPointCloudModel(pl.LightningModule):
     def test_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
-        metrics = compute_metrics(y_hat, y, self.out_channels)
+        metrics = compute_metrics(y_hat, y, self.num_classes)
 
         self.log("test_loss", metrics["loss"])
         self.log("test_acc", metrics["acc"])
