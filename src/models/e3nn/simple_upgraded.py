@@ -8,14 +8,9 @@ import torch
 
 
 class SimpleUpgradedE3NN(pl.LightningModule):
-    """
-    Upgrade:
-    1. Deeper E3NN layers with residual connections
-    2. Attention-based pooling instead of simple max/mean
-    3. Higher-order spherical harmonics (l=3)
-    4. Better feature engineering
-    5. Batch normalization after E3NN layers
-    """
+    """ E3NN model operating on point cloud representation of density.
+        Improved with higher-order spherical harmonics, attention pooling, batch normalization and more scalar features."""
+    
 
     def __init__(
         self,
@@ -35,7 +30,6 @@ class SimpleUpgradedE3NN(pl.LightningModule):
         self.irreps_hidden3 = Irreps("128x0e + 8x1o + 4x2e + 2x3o")
         self.irreps_scalar = Irreps("256x0e")
 
-        # Added batch normalization
         self.e3nn_layer1 = Linear(self.irreps_in, self.irreps_hidden1)
         self.bn1 = BatchNorm(self.irreps_hidden1)
         
@@ -47,27 +41,28 @@ class SimpleUpgradedE3NN(pl.LightningModule):
         
         self.e3nn_layer4 = Linear(self.irreps_hidden3, self.irreps_scalar)
 
-        # Attention pooling
         self.attention = nn.Sequential(
             nn.Linear(256, 128),
             nn.Tanh(),
             nn.Linear(128, 1),
         )
 
-        # Classification head
         self.dropout = nn.Dropout(0.15)
         self.fc1 = nn.Linear(768, 384)  # 256*3 from pooling
         self.fc2 = nn.Linear(384, 192)
         self.fc3 = nn.Linear(192, num_classes)
-        
-        # Layer normalization
+
         self.ln1 = nn.LayerNorm(384)
         self.ln2 = nn.LayerNorm(192)
 
     def compute_point_features(self, points, density_values):
-        """
-        Enhanced feature computation with higher-order spherical harmonics.
-        Returns exactly 54 features: 8 scalars + 12 vectors + 20 tensors(l=2) + 14 tensors(l=3)
+        """ 
+        VECTORIZED computation of rotation-equivariant features.
+        Args:
+            points: (B, N, 3) normalized coordinates
+            density_values: (B, N) scalar density at each point
+        Returns:
+            features: (B, N, 54) equivariant features
         """
         B, N, _ = points.shape
 
@@ -80,7 +75,7 @@ class SimpleUpgradedE3NN(pl.LightningModule):
         r = torch.norm(centered_pts, dim=2, keepdim=True).clamp(min=1e-6)
         directions = centered_pts / r
 
-        # Compute up to l=3 spherical harmonics
+        # Up to l=3 spherical harmonics
         dirs_flat = directions.reshape(-1, 3)
         sh_l1 = spherical_harmonics(1, dirs_flat, normalize=True).reshape(B, N, 3)
         sh_l2 = spherical_harmonics(2, dirs_flat, normalize=True).reshape(B, N, 5)
@@ -115,8 +110,8 @@ class SimpleUpgradedE3NN(pl.LightningModule):
 
         # Rank-3 tensor features (2x3o = 2 tensors * 7 components = 14 features)
         tensor3_features = torch.cat([
-            sh_l3,                    # 7 features
-            sh_l3 * density,          # 7 features
+            sh_l3,                    
+            sh_l3 * density,          
         ], dim=-1)  # (B, N, 14)
 
         # Concatenate: 8 + 12 + 20 + 14 = 54 features
@@ -176,7 +171,7 @@ class SimpleUpgradedE3NN(pl.LightningModule):
         # Concatenate all pooling strategies
         x = torch.cat([x_max, x_mean, x_att], dim=-1)
 
-        # Classification head with layer norm
+        # Classification head with layer normalization
         x = torch.relu(self.ln1(self.fc1(self.dropout(x))))
         x = torch.relu(self.ln2(self.fc2(self.dropout(x))))
         x = self.fc3(x)
@@ -193,6 +188,8 @@ class SimpleUpgradedE3NN(pl.LightningModule):
         self.log("train_acc", metrics["acc"])
         self.log("train_top_10_acc", metrics["top_10_acc"])
         self.log("train_brier_score", metrics["brier_score"])
+        self.log("train_macro_recall", metrics["macro_recall"])
+        self.log("train_mean_rank", metrics["mean_rank"])
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -204,6 +201,8 @@ class SimpleUpgradedE3NN(pl.LightningModule):
         self.log("val_acc", metrics["acc"])
         self.log("val_top_10_acc", metrics["top_10_acc"])
         self.log("val_brier_score", metrics["brier_score"])
+        self.log("val_macro_recall", metrics["macro_recall"])
+        self.log("val_mean_rank", metrics["mean_rank"])
         return metrics["loss"]
 
     def test_step(self, batch, batch_idx):
@@ -215,6 +214,8 @@ class SimpleUpgradedE3NN(pl.LightningModule):
         self.log("test_acc", metrics["acc"])
         self.log("test_top_10_acc", metrics["top_10_acc"])
         self.log("test_brier_score", metrics["brier_score"])
+        self.log("test_macro_recall", metrics["macro_recall"])
+        self.log("test_mean_rank", metrics["mean_rank"])
         return metrics["loss"]
 
     def configure_optimizers(self):
@@ -222,15 +223,11 @@ class SimpleUpgradedE3NN(pl.LightningModule):
             self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay
         )
         
-        # Cosine annealing with warm restarts (better than ReduceLROnPlateau)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-            optimizer, T_0=10, T_mult=2, eta_min=1e-6
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="min", factor=0.5, patience=5
         )
-        
+
         return {
             "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": scheduler,
-                "interval": "epoch",
-            },
+            "lr_scheduler": {"scheduler": scheduler, "monitor": "val_loss"},
         }
