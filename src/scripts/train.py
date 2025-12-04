@@ -1,6 +1,5 @@
 from src.models.clifford.model import CliffordSteerableNetwork
 from src.models.e3nn.model import E3NNPointCloudModel
-from src.models.e3nn.simple_upgraded import SimpleUpgradedE3NN
 from src.pipeline.dataset import BlobDataset
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
 from pytorch_lightning.loggers import WandbLogger
@@ -66,7 +65,7 @@ def get_dataloader(dataset, cfg, shuffle: bool):
 def main(cfg: DictConfig):  
     if cfg.model.type == "clifford":
         transform = transform_clifford
-    elif cfg.model.type in ["e3nn", "e3nn_simple"]:
+    elif cfg.model.type == "e3nn":
         transform = transform_e3nn
     else:
         raise ValueError(f"Unknown model type: {cfg.model.type}")
@@ -127,13 +126,6 @@ def main(cfg: DictConfig):
 
     elif cfg.model.type == "e3nn":
         model = E3NNPointCloudModel(
-            num_classes=cfg.train.out_channels,
-            learning_rate=cfg.train.learning_rate,
-            weight_decay=cfg.train.weight_decay,
-        )
-        
-    elif cfg.model.type == "e3nn_simple":
-        model = SimpleUpgradedE3NN(
             num_classes=cfg.train.out_channels,
             learning_rate=cfg.train.learning_rate,
             weight_decay=cfg.train.weight_decay,
