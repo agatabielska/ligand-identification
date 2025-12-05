@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 from omegaconf import DictConfig, OmegaConf
 from src.utils.set_seed import set_seed
+from pathlib import Path
 import numpy as np
 import hydra
 import torch
@@ -73,6 +74,8 @@ def main(cfg: DictConfig):
         project="ligand-identification",
         config=OmegaConf.to_container(cfg, resolve=True),
     )
+    run_ckpt_dir = Path(cfg.paths.model_checkpoint) / wandb_logger.experiment.name
+    run_ckpt_dir.mkdir(parents=True, exist_ok=True)
 
     if cfg.model.type == "clifford":
         transform = transform_clifford
@@ -91,7 +94,7 @@ def main(cfg: DictConfig):
 
     checkpoint_callback = ModelCheckpoint(
         monitor=cfg.train.early_stopping.monitor,
-        dirpath=cfg.paths.model_checkpoint,
+        dirpath=str(run_ckpt_dir),
         filename="model-{epoch:02d}-{val_loss:.2f}",
         mode=cfg.train.early_stopping.mode,
         save_top_k=3,
