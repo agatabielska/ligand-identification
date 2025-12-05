@@ -7,7 +7,6 @@ import torch.nn as nn
 import torch
 
 
-
 class E3NNPointCloudModel(pl.LightningModule):
     """ E3NN model operating on point cloud representation of density.
         Improved with higher-order spherical harmonics, attention pooling, 

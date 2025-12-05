@@ -1,7 +1,11 @@
 from src.models.clifford.model import CliffordSteerableNetwork
 from src.models.e3nn.model import E3NNPointCloudModel
 from src.pipeline.dataset import BlobDataset
-from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
+from pytorch_lightning.callbacks import (
+    ModelCheckpoint,
+    EarlyStopping,
+    LearningRateMonitor,
+)
 from pytorch_lightning.loggers import WandbLogger
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
@@ -9,7 +13,6 @@ from omegaconf import DictConfig, OmegaConf
 import numpy as np
 import hydra
 import torch
-
 
 
 def transform_clifford(npz):
@@ -62,18 +65,18 @@ def get_dataloader(dataset, cfg, shuffle: bool):
 
 
 @hydra.main(config_path="../../configs", config_name="config", version_base=None)
-def main(cfg: DictConfig):  
+def main(cfg: DictConfig):
+    wandb_logger = WandbLogger(
+        project="ligand-identification",
+        config=OmegaConf.to_container(cfg, resolve=True),
+    )
+
     if cfg.model.type == "clifford":
         transform = transform_clifford
     elif cfg.model.type == "e3nn":
         transform = transform_e3nn
     else:
         raise ValueError(f"Unknown model type: {cfg.model.type}")
-
-    wandb_logger = WandbLogger(
-        project="ligand-identification",
-        config=OmegaConf.to_container(cfg, resolve=True),
-    )
 
     train_dataset = get_dataset(cfg.paths.train_data, cfg, transform)
     val_dataset = get_dataset(cfg.paths.val_data, cfg, transform)
@@ -84,21 +87,21 @@ def main(cfg: DictConfig):
     test_dataloader = get_dataloader(test_dataset, cfg, shuffle=False)
 
     checkpoint_callback = ModelCheckpoint(
-        monitor="val_loss",
+        monitor=cfg.train.early_stopping.monitor,
         dirpath=cfg.paths.model_checkpoint,
         filename="model-{epoch:02d}-{val_loss:.2f}",
-        mode="min",
+        mode=cfg.train.early_stopping.mode,
         save_top_k=3,
         save_last=True,
     )
-    
+
     early_stopping = EarlyStopping(
-        monitor="val_loss",
-        patience=15,
-        mode="min",
+        monitor=cfg.train.early_stopping.monitor,
+        patience=cfg.train.early_stopping.patience,
+        mode=cfg.train.early_stopping.mode,
         verbose=True,
     )
-    
+
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
 
     trainer = pl.Trainer(
@@ -109,7 +112,6 @@ def main(cfg: DictConfig):
         log_every_n_steps=10,
         logger=wandb_logger,
     )
-
 
     if cfg.model.type == "clifford":
         model = CliffordSteerableNetwork(
@@ -134,8 +136,8 @@ def main(cfg: DictConfig):
         raise ValueError(f"Unknown model type: {cfg.model.type}")
 
     trainer.fit(model, train_dataloader, val_dataloader)
-
     trainer.test(ckpt_path="best", dataloaders=test_dataloader)
+
 
 if __name__ == "__main__":
     main()

@@ -9,6 +9,10 @@ train:
   out_channels: 219
   normalize_data: true
   weight_decay: 1e-4
+  early_stopping:
+    patience: 15
+    mode: min
+    monitor: val_loss
 
 paths:
   train_data: data/processed/train
