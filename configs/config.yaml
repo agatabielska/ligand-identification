@@ -19,3 +19,5 @@ paths:
   val_data: data/processed/val
   test_data: data/processed/test
   model_checkpoint: checkpoints/
+
+random_seed: 42

@@ -10,6 +10,7 @@ from pytorch_lightning.loggers import WandbLogger
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 from omegaconf import DictConfig, OmegaConf
+from src.utils.set_seed import set_seed
 import numpy as np
 import hydra
 import torch
@@ -66,6 +67,8 @@ def get_dataloader(dataset, cfg, shuffle: bool):
 
 @hydra.main(config_path="../../configs", config_name="config", version_base=None)
 def main(cfg: DictConfig):
+    set_seed(cfg.random_seed)
+
     wandb_logger = WandbLogger(
         project="ligand-identification",
         config=OmegaConf.to_container(cfg, resolve=True),
