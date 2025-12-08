@@ -16,8 +16,9 @@ train:
 
 test:
   checkpoint_path: model.ckpt
+  class_mapping_path: data/processed_map_cryoem/class_mapping.json
   verbose: true
-
+  
 paths:
   train_data: data/processed_cryoem/train
   val_data: data/processed_cryoem/val

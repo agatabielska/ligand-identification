@@ -11,6 +11,19 @@ import numpy as np
 import hydra
 import torch
 import torch.nn.functional as F
+import json
+
+
+def load_class_mapping(mapping_file: Path):
+    """Load class mapping from JSON file."""
+    if not mapping_file.exists():
+        print(f"Class mapping file not found at {mapping_file}")
+        return None
+    
+    with open(mapping_file, "r") as f:
+        mapping = json.load(f)
+
+    return {int(k): v for k, v in mapping.items()}
 
 
 def transform_clifford(npz):
@@ -62,19 +75,13 @@ def get_dataloader(dataset, cfg, shuffle: bool):
     )
 
 
-def verbose_predictions(model, dataloader, device, dataset):
+def verbose_predictions(model, dataloader, device, dataset, class_mapping=None):
     """
     Run predictions with detailed output for each sample.
-    
-    Args:
-        model: trained model
-        dataloader: test dataloader
-        device: device to run on
-        dataset: dataset object to get filenames
     """
     model.eval()
     model.to(device)
-
+    
     all_correct = 0
     all_total = 0
     
@@ -109,21 +116,23 @@ def verbose_predictions(model, dataloader, device, dataset):
                 if is_correct:
                     all_correct += 1
                 
+                true_name = class_mapping.get(true_class, str(true_class)) if class_mapping else str(true_class)
+                pred_name = class_mapping.get(pred_class, str(pred_class)) if class_mapping else str(pred_class)
+                
                 status = "CORRECT" if is_correct else "WRONG"
                 print(f"\n[{sample_idx + 1}] {sample_name}")
                 print(f"Result: {status}")
-                print(f"True: {true_class} | Predicted: {pred_class} ({pred_prob:.4f})")
+                print(f"True: {true_name} (class {true_class}) | Predicted: {pred_name} (class {pred_class}")
                 print(f"Top 10:")
                 
                 for rank, (prob, cls) in enumerate(zip(top10_probs[i], top10_classes[i]), 1):
-                    marker = "*" if cls.item() == true_class else " "
-                    print(f"  {rank:2d}. Class {cls.item():3d}: {prob.item():.4f} {marker}")
-                
-                print("-" * 100)
+                    cls_idx = cls.item()
+                    cls_name = class_mapping.get(cls_idx, str(cls_idx)) if class_mapping else str(cls_idx)
+                    marker = "*" if cls_idx == true_class else " "
+                    print(f"  {rank:2d}. {cls_name:30s} (class {cls_idx:3d}): {prob.item():.4f} {marker}")
     
     accuracy = all_correct / all_total if all_total > 0 else 0
     print(f"\nTotal: {all_correct}/{all_total} correct ({accuracy:.2%})")
-    print("="*100 + "\n")
 
 
 @hydra.main(config_path="../../configs", config_name="config", version_base=None)
@@ -132,6 +141,22 @@ def main(cfg: DictConfig):
         raise ValueError("Checkpoint path not set in config (test.checkpoint_path)")
 
     set_seed(cfg.random_seed)
+
+    # Load class mapping, if not provided in config, try default location - parent of test data folder
+    class_mapping = None
+    if cfg.test.class_mapping_path:
+        mapping_file = Path(cfg.test.class_mapping_path)
+        class_mapping = load_class_mapping(mapping_file)
+        if class_mapping:
+            print(f"Loaded class mapping with {len(class_mapping)} classes from {mapping_file}")
+    else:
+        data_root = Path(cfg.paths.test_data).parent
+        mapping_file = data_root / "class_mapping.json"
+        class_mapping = load_class_mapping(mapping_file)
+        if class_mapping:
+            print(f"Loaded class mapping with {len(class_mapping)} classes from {mapping_file}")
+        else:
+            print("No class mapping provided or found, using numeric labels")
 
     wandb_logger = None
     if cfg.get('use_wandb', False):
@@ -190,8 +215,8 @@ def main(cfg: DictConfig):
 
     if cfg.test.verbose:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        verbose_predictions(model, test_dataloader, device, test_dataset)
-    
+        verbose_predictions(model, test_dataloader, device, test_dataset, class_mapping)
+
     results = trainer.test(model, dataloaders=test_dataloader)
 
     return results

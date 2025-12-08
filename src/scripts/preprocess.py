@@ -10,10 +10,11 @@ from typing import List, Tuple
 from pathlib import Path
 import numpy as np
 import argparse
+import json
 
 
 def load_folders(
-    train_folder_paths: list[Path], test_folder_paths: list[Path]
+    train_folder_paths: list[Path], test_folder_paths: list[Path], output_folder: Path
 ) -> Tuple[List[Path], List[int], List[Path], List[int]]:
     for folder_path in [*train_folder_paths, *test_folder_paths]:
         if not folder_path.exists():
@@ -33,6 +34,12 @@ def load_folders(
     unique_class_names = list(sorted(unique_class_names))
 
     class_name_to_label = {name: idx for idx, name in enumerate(unique_class_names)}
+
+    label_to_class_name = {str(v): k for k, v in class_name_to_label.items()}
+    mapping_file = output_folder / "class_mapping.json"
+    with open(mapping_file, "w") as f:
+        json.dump(label_to_class_name, f, indent=2)
+    print(f"Total classes: {len(label_to_class_name)} saved to {mapping_file}")
 
     train_files = []
     train_labels = []
@@ -171,7 +178,9 @@ if __name__ == "__main__":
     output_folder.mkdir(parents=True, exist_ok=True)
 
     train_files, train_labels, test_files, test_labels = load_folders(
-        [Path(path) for path in args.train_folders], [Path(path) for path in args.test_folders]
+        [Path(path) for path in args.train_folders], 
+        [Path(path) for path in args.test_folders],
+        output_folder
     )
 
     train_files, train_labels = handle_single_example(
