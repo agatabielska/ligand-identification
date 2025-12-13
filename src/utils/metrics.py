@@ -26,7 +26,7 @@ def compute_metrics(y_hat, y, n_channels):
         "top_10_acc": metrics.top_k_accuracy_score(y, prob, k=10, labels=labels),
         "brier_score": metrics.brier_score_loss(y, prob, labels=labels),
         "macro_recall": metrics.recall_score(
-            y, pred, average="macro", zero_division=0, labels=labels
+            y, pred, average="macro", zero_division=0
         ),
         "mean_rank": np.mean(ranks),
     }
