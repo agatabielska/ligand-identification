@@ -1,0 +1,2 @@
+accuracy,correct,total,n_classes,top_1_accuracy,top_5_accuracy,top_10_accuracy,top_20_accuracy,total_errors,error_rate,avg_error_confidence,avg_correct_confidence,confidence_gap
+0.6449878598681928,7438,11532,76,0.6449878598681928,0.9409469302809573,0.9746791536593826,0.9899410336455081,4094,0.35501214013180715,0.6158475,0.79202735,0.17617983
