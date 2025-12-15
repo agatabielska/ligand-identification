@@ -72,14 +72,6 @@ def main(cfg: DictConfig):
     else:
         raise ValueError(f"Unknown model type: {cfg.model.type}")
 
-    # Macro recall was not calculated correctly during training, since the number of classes
-    # did not reflect the actual number of classes in the dataset. Override it here if specified.
-    if cfg.override_classes is not None:
-        if cfg.model.type == "clifford":
-            model.out_channels = cfg.override_classes
-        elif cfg.model.type == "e3nn":
-            model.num_classes = cfg.override_classes
-
     trainer = pl.Trainer(
         accelerator="auto",
         devices=cfg.machine.devices,
