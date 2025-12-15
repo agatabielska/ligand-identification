@@ -74,7 +74,7 @@ def main(cfg: DictConfig):
         project="ligand-identification",
         config=OmegaConf.to_container(cfg, resolve=True),
     )
-    run_ckpt_dir = Path(cfg.paths.model_checkpoint) / wandb_logger.experiment.name
+    run_ckpt_dir = Path(cfg.paths.model_checkpoint) / wandb_logger.experiment.id
     run_ckpt_dir.mkdir(parents=True, exist_ok=True)
 
     if cfg.model.type == "clifford":
