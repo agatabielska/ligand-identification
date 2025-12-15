@@ -45,7 +45,7 @@ def main(cfg: DictConfig):
         raise ValueError(f"Unknown model type: {cfg.model.type}")
 
     test_dataset = get_dataset(cfg.paths.test_data, cfg, transform)
-    test_dataloader = get_dataloader(test_dataset, cfg)
+    test_dataloader = get_dataloader(test_dataset, cfg, shuffle=False)
 
     checkpoint_path = resolve_checkpoint_path(cfg)
 
