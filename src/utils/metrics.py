@@ -6,6 +6,7 @@ import torch
 
 @torch.no_grad()
 def compute_metrics(y_hat, y, n_channels):
+    y_hat = y_hat[:, :n_channels]
     loss = F.cross_entropy(y_hat, y).cpu().item()
     prob = F.softmax(y_hat, dim=1).cpu().numpy()
     y = y.squeeze().cpu().numpy()
