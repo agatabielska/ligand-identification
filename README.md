@@ -13,12 +13,13 @@ uv sync
 uv run streamlit run src/visualizations/blob_visualization.py
 ```
 
-# To prepare data for the model
-### Download xray training and holdout mapping
+# DEPRECATED, see new CryoEM class grouping section below
+# ~~To prepare data for the model~~
+### ~~Download xray training and holdout mapping~~
 ```bash
 ./src/scripts/download_xray_mapping.sh
 ```
-### Download and unpack blobs
+### ~~Download and unpack blobs~~
 X-ray:
 ```bash
 ./src/scripts/download_xray_blobs.sh
@@ -29,7 +30,7 @@ CryoEM:
 ./src/scripts/download_cryoem_blobs.sh
 ```
 
-### Group blobs into classes according to xray mapping (run group_xray_blobs.sh first)
+### ~~Group blobs into classes according to xray mapping (run group_xray_blobs.sh first)~~
 X-ray:
 ```bash
 ./src/scripts/group_xray_blobs.sh
@@ -39,4 +40,11 @@ CryoEM:
 ./src/scripts/group_cryoem_blobs.sh
 ```
 
+# NEW, CryoEM only class grouping
+```bash
+./src/scripts/download_cryoem_blobs.sh
+./src/scripts/get_frequent_classes.sh
+./src/scripts/filter_cryoem_classes.sh
+```
 
+Resulting groupings will be in `data/filtered_cryoem_classes/`
