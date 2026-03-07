@@ -1,1 +1,2 @@
 type: e3nn
+batch_norm_momentum: 0.1

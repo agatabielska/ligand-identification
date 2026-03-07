@@ -117,6 +117,7 @@ def main(cfg: DictConfig):
         devices=cfg.machine.devices,
         log_every_n_steps=10,
         logger=wandb_logger,
+        gradient_clip_val=cfg.train.gradient_clip_val,
     )
 
     if cfg.model.type == "clifford":
@@ -137,6 +138,7 @@ def main(cfg: DictConfig):
             num_classes=cfg.train.out_channels,
             learning_rate=cfg.train.learning_rate,
             weight_decay=cfg.train.weight_decay,
+            batch_norm_momentum=cfg.model.batch_norm_momentum,
         )
     else:
         raise ValueError(f"Unknown model type: {cfg.model.type}")

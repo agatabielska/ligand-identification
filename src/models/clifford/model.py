@@ -3,6 +3,7 @@ from typing import List, Optional
 import torch.nn.functional as F
 import pytorch_lightning as pl
 import torch.nn as nn
+import torchmetrics
 import torch
 
 
@@ -447,6 +448,22 @@ class CliffordSteerableNetwork(pl.LightningModule):
             nn.Linear(512, out_channels),
         )
 
+        # I have to use torchmetrics for macro recall, because it cannot be computed
+        # from batches, and sklearn's recall_score doesn't work with accumulating the
+        # statistics across batches.
+        self.val_recall = torchmetrics.Recall(
+            num_classes=out_channels,
+            average="macro",
+            task="multiclass",
+            zero_division=0,
+        )
+        self.test_recall = torchmetrics.Recall(
+            num_classes=out_channels,
+            average="macro",
+            task="multiclass",
+            zero_division=0,
+        )
+
     def forward(self, x):
         x = self.features(x)
         x = self.pool(x)
@@ -465,7 +482,6 @@ class CliffordSteerableNetwork(pl.LightningModule):
         self.log("train_acc", metrics["acc"])
         self.log("train_top_10_acc", metrics["top_10_acc"])
         self.log("train_brier_score", metrics["brier_score"])
-        self.log("train_macro_recall", metrics["macro_recall"])
         self.log("train_mean_rank", metrics["mean_rank"])
         return loss
 
@@ -474,26 +490,51 @@ class CliffordSteerableNetwork(pl.LightningModule):
         y_hat = self(x)
         metrics = compute_metrics(y_hat, y, self.out_channels)
 
+        preds = y_hat.argmax(dim=1)
+        target = y.squeeze()
+        self.val_recall.update(preds, target)
+
         self.log("val_loss", metrics["loss"])
         self.log("val_acc", metrics["acc"])
         self.log("val_top_10_acc", metrics["top_10_acc"])
         self.log("val_brier_score", metrics["brier_score"])
-        self.log("val_macro_recall", metrics["macro_recall"])
         self.log("val_mean_rank", metrics["mean_rank"])
         return metrics["loss"]
+
+    def on_validation_epoch_end(self):
+        recall = self.val_recall.compute()
+        self.log("val_macro_recall", recall)
+        self.val_recall.reset()
 
     def test_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
         metrics = compute_metrics(y_hat, y, self.out_channels)
 
+        preds = y_hat.argmax(dim=1)
+        target = y.squeeze()
+        self.test_recall.update(preds, target)
+
         self.log("test_loss", metrics["loss"])
         self.log("test_acc", metrics["acc"])
         self.log("test_top_10_acc", metrics["top_10_acc"])
         self.log("test_brier_score", metrics["brier_score"])
-        self.log("test_macro_recall", metrics["macro_recall"])
         self.log("test_mean_rank", metrics["mean_rank"])
         return metrics["loss"]
+
+    def on_test_epoch_end(self):
+        recall = self.test_recall.compute()
+        self.log("test_macro_recall", recall)
+        self.test_recall.reset()
+
+    def on_before_optimizer_step(self, optimizer):
+        # Compute and log the total gradient norm
+        total_norm = 0.0
+        for p in self.parameters():
+            if p.grad is not None:
+                total_norm += p.grad.data.norm(2).item() ** 2
+        total_norm = total_norm**0.5
+        self.log("grad_norm", total_norm, on_step=True)
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(
