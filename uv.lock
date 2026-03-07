@@ -565,6 +565,7 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "streamlit" },
     { name = "torch" },
+    { name = "torchmetrics" },
     { name = "wandb" },
 ]
 
@@ -583,6 +584,7 @@ requires-dist = [
     { name = "scikit-learn", specifier = ">=1.7.2" },
     { name = "streamlit", specifier = ">=1.50.0" },
     { name = "torch", specifier = ">=2.9.0" },
+    { name = "torchmetrics", specifier = ">=1.8.2" },
     { name = "wandb", specifier = ">=0.23.0" },
 ]
 
