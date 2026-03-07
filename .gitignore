@@ -4,6 +4,9 @@
 /data/*.npz
 /data/*.zip
 /data/*.tar*
+/data/ligand_mapping.csv
+/data/xray_holdout.csv
+/data/xray_train.csv
 /.venv/
 **/__pycache__/
 *.pth
@@ -12,3 +15,4 @@
 /lightning_logs/
 /multirun/
 /wandb/
+/allocate*
