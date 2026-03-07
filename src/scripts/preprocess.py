@@ -22,7 +22,7 @@ def load_folders(
     train_class_dirs = []
     for train_folder_path in train_folder_paths:
         train_class_dirs.extend([d for d in train_folder_path.iterdir() if d.is_dir()])
-        
+
     test_class_dirs = []
     for test_folder_path in test_folder_paths:
         test_class_dirs.extend([d for d in test_folder_path.iterdir() if d.is_dir()])
@@ -171,7 +171,8 @@ if __name__ == "__main__":
     output_folder.mkdir(parents=True, exist_ok=True)
 
     train_files, train_labels, test_files, test_labels = load_folders(
-        [Path(path) for path in args.train_folders], [Path(path) for path in args.test_folders]
+        [Path(path) for path in args.train_folders],
+        [Path(path) for path in args.test_folders],
     )
 
     train_files, train_labels = handle_single_example(

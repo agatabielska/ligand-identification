@@ -8,10 +8,10 @@ import torch
 
 
 class E3NNPointCloudModel(pl.LightningModule):
-    """ E3NN model operating on point cloud representation of density.
-        Improved with higher-order spherical harmonics, attention pooling, 
-        batch normalization and more scalar features."""
-    
+    """E3NN model operating on point cloud representation of density.
+    Improved with higher-order spherical harmonics, attention pooling,
+    batch normalization and more scalar features."""
+
     def __init__(
         self,
         num_classes: int,
@@ -32,13 +32,13 @@ class E3NNPointCloudModel(pl.LightningModule):
 
         self.e3nn_layer1 = Linear(self.irreps_in, self.irreps_hidden1)
         self.bn1 = BatchNorm(self.irreps_hidden1)
-        
+
         self.e3nn_layer2 = Linear(self.irreps_hidden1, self.irreps_hidden2)
         self.bn2 = BatchNorm(self.irreps_hidden2)
-        
+
         self.e3nn_layer3 = Linear(self.irreps_hidden2, self.irreps_hidden3)
         self.bn3 = BatchNorm(self.irreps_hidden3)
-        
+
         self.e3nn_layer4 = Linear(self.irreps_hidden3, self.irreps_scalar)
 
         self.attention = nn.Sequential(
@@ -54,21 +54,21 @@ class E3NNPointCloudModel(pl.LightningModule):
             nn.Linear(384, 192),
             nn.LayerNorm(192),
             nn.ReLU(),
-            nn.Linear(192, num_classes)
+            nn.Linear(192, num_classes),
         )
 
     def compute_point_features(self, points, density_values):
-        """ 
+        """
         VECTORIZED computation of rotation-equivariant features.
-        
+
         Args:
             points: (B, N, 3) normalized coordinates
             density_values: (B, N) scalar density at each point
-            
+
         Returns:
             features: (B, N, 54) equivariant features
                 - 8 scalar features (l=0)
-                - 12 vector features (l=1) 
+                - 12 vector features (l=1)
                 - 20 rank-2 tensor features (l=2)
                 - 14 rank-3 tensor features (l=3)
         """
@@ -99,7 +99,16 @@ class E3NNPointCloudModel(pl.LightningModule):
         density_r2 = density * r_squared
         gaussian_like = torch.exp(-r_squared / 2.0)
         scalar_features = torch.cat(
-            [density, r, log_r, r_squared, density_r, density_r2, gaussian_like, r_cubed],
+            [
+                density,
+                r,
+                log_r,
+                r_squared,
+                density_r,
+                density_r2,
+                gaussian_like,
+                r_cubed,
+            ],
             dim=-1,
         )
 
@@ -107,23 +116,28 @@ class E3NNPointCloudModel(pl.LightningModule):
         weighted_dirs = directions * density
         scaled_dirs = directions * log_r
         vector_features = torch.cat(
-            [directions, sh_l1, weighted_dirs, scaled_dirs], 
-            dim=-1
+            [directions, sh_l1, weighted_dirs, scaled_dirs], dim=-1
         )
 
         # Rank-2 tensor features (4x2e = 4 tensors * 5 components = 20 features)
-        tensor2_features = torch.cat([
-            sh_l2,                    
-            sh_l2 * density,          
-            sh_l2 * r,                
-            sh_l2 * log_r,           
-        ], dim=-1)
+        tensor2_features = torch.cat(
+            [
+                sh_l2,
+                sh_l2 * density,
+                sh_l2 * r,
+                sh_l2 * log_r,
+            ],
+            dim=-1,
+        )
 
         # Rank-3 tensor features (2x3o = 2 tensors * 7 components = 14 features)
-        tensor3_features = torch.cat([
-            sh_l3,                    
-            sh_l3 * density,          
-        ], dim=-1)
+        tensor3_features = torch.cat(
+            [
+                sh_l3,
+                sh_l3 * density,
+            ],
+            dim=-1,
+        )
 
         # Concatenate all: 8 + 12 + 20 + 14 = 54 features
         point_features = torch.cat(
@@ -136,29 +150,29 @@ class E3NNPointCloudModel(pl.LightningModule):
     def attention_pooling(self, x):
         """
         Attention-weighted pooling: learns which points are most important.
-        
+
         Args:
             x: (B, N, D) - features for each point
-            
+
         Returns:
             (B, D) - single feature vector per batch element
         """
         # Compute attention weights for each point
         att_weights = self.attention(x)
         att_weights = F.softmax(att_weights, dim=1)
-        
+
         # Weighted sum across points
-        x_att = (x * att_weights).sum(dim=1) 
-        
+        x_att = (x * att_weights).sum(dim=1)
+
         return x_att
 
     def forward(self, x):
         """
         Forward pass through the entire network.
-        
+
         Args:
             x: (B, N, 4) - point cloud with [x, y, z, density]
-            
+
         Returns:
             logits: (B, num_classes) - raw class scores
         """
@@ -171,19 +185,19 @@ class E3NNPointCloudModel(pl.LightningModule):
         # E3NN layers with batch normalization
         x = self.e3nn_layer1(point_features)
         x = self.bn1(x)
-        
+
         x = self.e3nn_layer2(x)
         x = self.bn2(x)
-        
+
         x = self.e3nn_layer3(x)
         x = self.bn3(x)
-        
-        x = self.e3nn_layer4(x) 
+
+        x = self.e3nn_layer4(x)
 
         # Multi-scale pooling to aggregate point features
-        x_max = torch.max(x, dim=1)[0]      # (B, 256)
-        x_mean = torch.mean(x, dim=1)       # (B, 256)
-        x_att = self.attention_pooling(x)   # (B, 256)
+        x_max = torch.max(x, dim=1)[0]  # (B, 256)
+        x_mean = torch.mean(x, dim=1)  # (B, 256)
+        x_att = self.attention_pooling(x)  # (B, 256)
 
         # Concatenate all pooling strategies
         x = torch.cat([x_max, x_mean, x_att], dim=-1)  # (B, 768)
@@ -235,16 +249,11 @@ class E3NNPointCloudModel(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(
-            self.parameters(), 
-            lr=self.learning_rate, 
-            weight_decay=self.weight_decay
+            self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay
         )
-        
+
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, 
-            mode="min", 
-            factor=0.5, 
-            patience=5
+            optimizer, mode="min", factor=0.5, patience=5
         )
 
         return {

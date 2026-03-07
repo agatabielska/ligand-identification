@@ -456,7 +456,7 @@ class CliffordSteerableNetwork(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
-        
+
         # Computing the loss separately, since compute_metrics won't pass the gradient
         loss = F.cross_entropy(y_hat, y)
         metrics = compute_metrics(y_hat, y, self.out_channels)
