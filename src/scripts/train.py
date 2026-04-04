@@ -45,9 +45,9 @@ def transform_e3nn(npz):
     return torch.from_numpy(points)
 
 
-def get_dataset(path: str, cfg, transform, label_to_idx: dict):
+def get_dataset(path: Path, cfg, transform, label_to_idx: dict):
     return BlobDataset(
-        path=path,
+        path=str(path),
         transform=transform,
         normalize=cfg.train.normalize_data,
         cache=cfg.machine.cache_dataset,
@@ -87,15 +87,15 @@ def main(cfg: DictConfig):
 
     all_classes = sorted(set(
         d.name
-        for folder in [cfg.paths.train_data, cfg.paths.val_data, cfg.paths.test_data]
-        for d in Path(folder).iterdir()
+        for folder_name in ["train", "val", "test"]
+        for d in (Path(cfg.paths.data_dir) / folder_name).iterdir()
         if d.is_dir()
     ))
     label_to_idx = {name: idx for idx, name in enumerate(all_classes)}
 
-    train_dataset = get_dataset(cfg.paths.train_data, cfg, transform, label_to_idx)
-    val_dataset   = get_dataset(cfg.paths.val_data,   cfg, transform, label_to_idx)
-    test_dataset  = get_dataset(cfg.paths.test_data,  cfg, transform, label_to_idx)
+    train_dataset = get_dataset(Path(cfg.paths.data_dir) / "train", cfg, transform, label_to_idx)
+    val_dataset   = get_dataset(Path(cfg.paths.data_dir) / "val",   cfg, transform, label_to_idx)
+    test_dataset  = get_dataset(Path(cfg.paths.data_dir) / "test",  cfg, transform, label_to_idx)
     train_dataloader = get_dataloader(train_dataset, cfg, shuffle=True)
     val_dataloader = get_dataloader(val_dataset, cfg, shuffle=False)
     test_dataloader = get_dataloader(test_dataset, cfg, shuffle=False)
