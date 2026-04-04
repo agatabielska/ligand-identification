@@ -9,6 +9,7 @@ train:
   out_channels: 219
   normalize_data: true
   weight_decay: 1e-4
+  gradient_clip_val: null
   early_stopping:
     patience: 15
     mode: min
