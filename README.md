@@ -43,8 +43,7 @@ CryoEM:
 # NEW, CryoEM only class grouping
 ```bash
 ./src/scripts/download_cryoem_blobs.sh
-./src/scripts/get_frequent_groups.sh
-./src/scripts/filter_cryoem_classes.sh
+uv run -m src.scripts.preprocess --folders "data/filtered_cryoem_classes/" --output-folder "data/test"
 ```
 
 Resulting groupings will be in `data/filtered_cryoem_classes/`

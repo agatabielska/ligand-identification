@@ -66,6 +66,11 @@ for ligand, files in moves.items():
         f.rename(target / f.name)
         grouped += 1
 
+# Remove empty directories
+for d in cryoem_dir.iterdir():
+    if d.is_dir() and not any(d.iterdir()):
+        d.rmdir()
+
 print(grouped, skipped)
 EOF
 )
@@ -114,6 +119,10 @@ fi
 
 echo -e "\n${BLUE}[3/3] Filtering common ligands (>= $THRESHOLD files)...${NC}"
 
+# Remove $OUTPUT_FILE if it exists
+if [[ -f "$OUTPUT_FILE" ]]; then
+    rm "$OUTPUT_FILE"
+fi
 # Filter ligands with count >= threshold and save to output file
 > "$OUTPUT_FILE"
 COMMON_COUNT=0

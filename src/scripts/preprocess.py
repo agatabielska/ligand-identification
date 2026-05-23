@@ -3,7 +3,7 @@ from src.utils.sampling_strategies import (
     ProbabilisticSelectionTransform,
     SpatialNormalization3,
 )
-from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor, wait, as_completed
 from sklearn.model_selection import StratifiedGroupKFold
 from typing import List, Tuple
 from pathlib import Path
@@ -50,7 +50,7 @@ def stratified_group_split(
     n_splits: int,
     random_state: int,
 ) -> Tuple[List[Path], List[str], List[Path], List[str], List[Path], List[str]]:
-    
+       
     files_arr  = np.array(files,  dtype=object)
     ligand_names = np.array(labels, dtype=object)
     pdb_ids = np.array(groups, dtype=object)
@@ -59,28 +59,110 @@ def stratified_group_split(
     iterator = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
     folds = list(iterator.split(files_arr, ligand_names, pdb_ids))
 
-    # Split into n_splits folds, takes fold 0 as test, fold 1 as val, and the rest as train
-    test_idx  = folds[0][1]
-    val_idx   = folds[1][1]
+    # Look for the best split that has the most classes in the intersection of train/val/test sets to maximize class representation across splits
+    best_indices = None
+    most_classes = 0
+    for test_fold_idx in range(n_splits):
+        for val_fold_idx in range(test_fold_idx + 1, n_splits):
+            # Split into n_splits folds, takes fold 0 as test, fold 1 as val, and the rest as train
+            test_idx  = folds[test_fold_idx][1]
+            val_idx   = folds[val_fold_idx][1]
 
-    # Train: remaining files not in test or val
+            # Train: remaining files not in test or val
+            exclude   = set(test_idx) | set(val_idx)
+            train_idx = [i for i in range(len(files_arr)) if i not in exclude]
+
+            train_files  = files_arr[train_idx]
+            train_labels = ligand_names[train_idx]
+            val_files    = files_arr[val_idx]
+            val_labels   = ligand_names[val_idx]
+            test_files   = files_arr[test_idx]
+            test_labels  = ligand_names[test_idx]
+            
+            # check the size of class intersection
+            train_classes = set(train_labels)
+            val_classes   = set(val_labels)
+            test_classes  = set(test_labels)
+            
+            intersection = train_classes & val_classes & test_classes
+            
+            if len(intersection) > most_classes:
+                most_classes = len(intersection)
+                best_indices = (test_fold_idx, val_fold_idx)
+    
+    print(f"Best split found with {most_classes} classes in intersection (Test fold: {best_indices[0]}, Val fold: {best_indices[1]})")
+    
+    test_idx  = folds[best_indices[0]][1]
+    val_idx   = folds[best_indices[1]][1]
     exclude   = set(test_idx) | set(val_idx)
     train_idx = [i for i in range(len(files_arr)) if i not in exclude]
-
+    
     train_files  = files_arr[train_idx]
     train_labels = ligand_names[train_idx]
     val_files    = files_arr[val_idx]
     val_labels   = ligand_names[val_idx]
     test_files   = files_arr[test_idx]
     test_labels  = ligand_names[test_idx]
-
+    
+    # Check if intersection is lower than the union
+    train_classes = set(train_labels)
+    val_classes   = set(val_labels)
+    test_classes  = set(test_labels)
+    intersection = train_classes & val_classes & test_classes
+    union = train_classes | val_classes | test_classes
+    if len(intersection) < len(union):
+        # Remove classes that are not in the intersection from ligand_groups.txt
+        ligand_groups_path = Path("data/ligand_groups.txt")
+        if not ligand_groups_path.exists():
+            raise ValueError(f"ligand_groups.txt not found at {ligand_groups_path}")
+        else:
+            counter = 0
+            with ligand_groups_path.open("r") as f:
+                lines = f.readlines()
+            with ligand_groups_path.open("w") as f:
+                for line in lines:
+                    ligand_name = line.split()[0]
+                    if ligand_name in intersection:
+                        f.write(line)
+                        counter += 1
+            print(f"Removed {len(union) - len(intersection)} classes from ligand_groups.txt, kept {counter} classes that are present in all splits.")
+        # Run filter_cryoem_classes.sh to remove files from classes that are not in the intersection
+        print("Running filter_cryoem_classes.sh to remove files from classes that are not in the intersection...")
+        filter_script = Path("src/scripts/filter_cryoem_classes.sh")
+        if not filter_script.exists():
+            raise ValueError(f"filter_cryoem_classes.sh not found at {filter_script}")
+        else:
+            import subprocess
+            subprocess.run(["bash", str(filter_script)], check=True)
+            print("Finished running filter_cryoem_classes.sh. Please re-run this script to load the updated files and splits.")
+        
+    removed_classes = union - intersection
+    # iterate through the ligand_names and if the ligand name is in removed_classes, change it to rare
+    # Why don't we just create splits again? it creates different splits resulting in less and less classes in each run
+    for i in range(len(train_labels)):
+        if train_labels[i] in removed_classes:
+            train_labels[i] = "rare"
+            file_path = train_files[i]
+            # Change the file path to point to the rare directory
+            train_files[i] = file_path.parent.parent / "rare" / file_path.name
+    for i in range(len(val_labels)):
+        if val_labels[i] in removed_classes:
+            val_labels[i] = "rare"
+            file_path = val_files[i]
+            # Change the file path to point to the rare directory
+            val_files[i] = file_path.parent.parent / "rare" / file_path.name
+    for i in range(len(test_labels)):
+        if test_labels[i] in removed_classes:
+            test_labels[i] = "rare"
+            file_path = test_files[i]
+            # Change the file path to point to the rare directory
+            test_files[i] = file_path.parent.parent / "rare" / file_path.name
+    
     return (
         list(train_files), list(train_labels),
         list(val_files),   list(val_labels),
         list(test_files),  list(test_labels),
     )
-
-
 
 
 def preprocess(
@@ -172,6 +254,24 @@ if __name__ == "__main__":
 
     output_folder = Path(args.output_folder)
     output_folder.mkdir(parents=True, exist_ok=True)
+    
+    # Run get_frequent_groups.sh and filter_cryoem_classes.sh
+    print("Running get_frequent_groups.sh to identify frequent ligand classes...")
+    get_groups_script = Path("src/scripts/get_frequent_groups.sh")
+    if not get_groups_script.exists():
+        raise ValueError(f"get_frequent_groups.sh not found at {get_groups_script}")
+    else:
+        import subprocess
+        subprocess.run(["bash", str(get_groups_script)], check=True)
+        print("Finished running get_frequent_groups.sh.")
+    print("Running filter_cryoem_classes.sh to filter classes based on frequency...")
+    filter_script = Path("src/scripts/filter_cryoem_classes.sh")
+    if not filter_script.exists():
+        raise ValueError(f"filter_cryoem_classes.sh not found at {filter_script}")
+    else:
+        import subprocess
+        subprocess.run(["bash", str(filter_script)], check=True)
+        print("Finished running filter_cryoem_classes.sh.")
 
     # Load all files into flat lists
     all_files, all_labels, all_groups = load_folders([Path(p) for p in args.folders])
@@ -211,5 +311,5 @@ if __name__ == "__main__":
                 preprocess, sublist, sublabels,
                 output_folder / "test",
                 transform_stack=args.transform_stack,
-            ))
+            ))            
     wait(futures)

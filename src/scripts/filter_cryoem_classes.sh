@@ -37,6 +37,12 @@ if [[ ! -f "$LIGAND_GROUPS" ]]; then
     exit 1
 fi
 
+# If output directory exists, delete it to start fresh
+if [[ -d "$OUTPUT_DIR" ]]; then
+    echo -e "${BLUE}⚠️  Warning: Output directory already exists. Deleting it to start fresh: $OUTPUT_DIR${NC}"
+    rm -rf "$OUTPUT_DIR"
+fi
+
 mkdir -p "$OUTPUT_DIR"
 mkdir -p "$RARE_DIR"
 
