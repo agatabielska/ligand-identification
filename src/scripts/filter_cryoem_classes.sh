@@ -7,10 +7,23 @@
 # Get script directory
 SCRIPT_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/"
 
+# Get raw data directory as a first argument
+CRYOEM_DIR_INPUT=$1
+if [[ -n "$CRYOEM_DIR_INPUT" ]]; then
+    CRYOEM_DIR="${SCRIPT_DIR}../../data/${CRYOEM_DIR_INPUT}"
+    OUTPUT_DIR="${SCRIPT_DIR}../../data/filtered_${CRYOEM_DIR_INPUT}"
+    if [[ ! -d "$CRYOEM_DIR" ]]; then
+        echo -e "${RED}❌ Error: CryoEM directory not found: $CRYOEM_DIR${NC}"
+        exit 1
+    fi
+else
+    echo -e "${BLUE}⚠️  Warning: No input directory provided. Using default: $CRYOEM_DIR${NC}"
+    CRYOEM_DIR="${SCRIPT_DIR}../../data/cryoem_blobs"
+    OUTPUT_DIR="${SCRIPT_DIR}../../data/filtered_cryoem_classes"
+fi
+
 # Configuration
-CRYOEM_DIR="${SCRIPT_DIR}../../data/cryoem_blobs"
 LIGAND_GROUPS="${SCRIPT_DIR}../../data/ligand_groups.txt"
-OUTPUT_DIR="${SCRIPT_DIR}../../data/filtered_cryoem_classes"
 RARE_DIR="${OUTPUT_DIR}/rare"
 
 # Colors

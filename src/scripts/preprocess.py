@@ -133,7 +133,7 @@ def stratified_group_split(
             raise ValueError(f"filter_cryoem_classes.sh not found at {filter_script}")
         else:
             import subprocess
-            subprocess.run(["bash", str(filter_script)], check=True)
+            subprocess.run(["bash", str(filter_script), args.raw_data_dir], check=True)
             print("Finished running filter_cryoem_classes.sh. Please re-run this script to load the updated files and splits.")
         
     removed_classes = union - intersection
@@ -214,11 +214,10 @@ if __name__ == "__main__":
         description="Preprocess data and save it to a file."
     )
     parser.add_argument(
-        "--folders",
+        "--raw-data-dir",
         type=str,
         required=True,
-        nargs="+",
-        help="Paths to data folders (each containing ligand class subdirs).",
+        help="Path to the raw data directory."
     )
     parser.add_argument(
         "--chunk-size",
@@ -252,7 +251,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    output_folder = Path(args.output_folder)
+    output_folder = Path(args.output_folder + f"_transform_{args.transform_stack}")
     output_folder.mkdir(parents=True, exist_ok=True)
     
     # Run get_frequent_groups.sh and filter_cryoem_classes.sh
@@ -270,11 +269,15 @@ if __name__ == "__main__":
         raise ValueError(f"filter_cryoem_classes.sh not found at {filter_script}")
     else:
         import subprocess
-        subprocess.run(["bash", str(filter_script)], check=True)
+        subprocess.run(["bash", str(filter_script), args.raw_data_dir], check=True)
         print("Finished running filter_cryoem_classes.sh.")
+        
+    filtered_data_dir = Path(f"data/filtered_{args.raw_data_dir}")
+    if not filtered_data_dir.exists():
+        raise ValueError(f"Filtered data directory not found: {filtered_data_dir}. Please run filter_cryoem_classes.sh to create it.")
 
     # Load all files into flat lists
-    all_files, all_labels, all_groups = load_folders([Path(p) for p in args.folders])
+    all_files, all_labels, all_groups = load_folders([filtered_data_dir])
     print(f"Total files   : {len(all_files)}")
     print(f"Total classes : {len(set(all_labels))}")
     print(f"Unique PDB IDs: {len(set(all_groups))}")
@@ -313,3 +316,11 @@ if __name__ == "__main__":
                 transform_stack=args.transform_stack,
             ))            
     wait(futures)
+    
+    # Remove filtered_data_dir and ligand_groups.txt
+    if filtered_data_dir.exists():
+        import shutil
+        shutil.rmtree(filtered_data_dir)
+    ligand_groups_path = Path("data/ligand_groups.txt")
+    if ligand_groups_path.exists():
+        ligand_groups_path.unlink()
