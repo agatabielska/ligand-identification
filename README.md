@@ -13,37 +13,10 @@ uv sync
 uv run streamlit run src/visualizations/blob_visualization.py
 ```
 
-# DEPRECATED, see new CryoEM class grouping section below
-# ~~To prepare data for the model~~
-### ~~Download xray training and holdout mapping~~
-```bash
-./src/scripts/download_xray_mapping.sh
-```
-### ~~Download and unpack blobs~~
-X-ray:
-```bash
-./src/scripts/download_xray_blobs.sh
-```
-
-CryoEM:
-```bash
-./src/scripts/download_cryoem_blobs.sh
-```
-
-### ~~Group blobs into classes according to xray mapping (run group_xray_blobs.sh first)~~
-X-ray:
-```bash
-./src/scripts/group_xray_blobs.sh
-```
-CryoEM:
-```bash
-./src/scripts/group_cryoem_blobs.sh
-```
-
 # NEW, CryoEM only class grouping
 ```bash
 ./src/scripts/download_cryoem_blobs.sh
-uv run -m src.scripts.preprocess --raw-data-dir "cryoem_blobs" --output-folder "data/test" --transform-stack "probabilistic"
+uv run -m src.scripts.preprocess --raw-data-dir "cryoem_blobs" --output-folder "data/thresholded" --transform-stack "probabilistic"
 ```
 To remove unnecessary files from NoThresholdBlobs run:
 ```bash
@@ -51,7 +24,7 @@ uv run -m src.scripts.trim_unthresholded
 ```
 And then to filter the classes:
 ```bash
-uv run -m src.scripts.preprocess --raw-data-dir "NoThresholdBlobs" --output-folder "data/testNoThreshold" --transform-stack "probabilistic"
+uv run -m src.scripts.preprocess --raw-data-dir "NoThresholdBlobs" --output-folder "data/unthresholded" --transform-stack "probabilistic"
 ```
 
 Resulting groupings will be in `data/filtered_cryoem_classes/`
