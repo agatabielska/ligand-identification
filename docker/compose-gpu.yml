@@ -8,6 +8,8 @@ services:
         CUDNN: ${CUDNN}
       context: ..
       dockerfile: docker/DockerfileGPU
+    #make it smaller for smaller hosts
+    shm_size: "16gb"
     volumes:
       - "../:/app:rw"
       - "${DATA_PATH}:/app/data:rw"

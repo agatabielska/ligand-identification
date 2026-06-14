@@ -5,7 +5,7 @@ from typing import Callable, Dict, Tuple, Union
 import numpy as np
 import itertools
 import math
-import open3d as o3d
+# import open3d as o3d
 import torch
 
 from scipy.ndimage import generic_filter
@@ -333,12 +333,12 @@ class NormalsTransform(Transform):
         if self.__dict__.get('method') is None:
             raise ValueError("{} requires 'method' key in config dictionary".format(type(self).__name__))
         self.method = config['method']
-        if self.method == 'open3d':
-            if self.__dict__.get('knn') is None:
-                raise ValueError("{} requires 'knn' key in config dictionary".format(type(self).__name__))
-            self._method = self._open3d_estimation
-            self.knn = config['knn']
-        elif self.method == 'riconv':
+        # if self.method == 'open3d':
+        #     if self.__dict__.get('knn') is None:
+        #         raise ValueError("{} requires 'knn' key in config dictionary".format(type(self).__name__))
+        #     self._method = self._open3d_estimation
+        #     self.knn = config['knn']
+        if self.method == 'riconv':
             if self.__dict__.get('weighting') is None:
                 raise ValueError("{} requires 'weighting' key in config dictionary".format(type(self).__name__))
             if self.__dict__.get('nsample') is None:
@@ -352,12 +352,12 @@ class NormalsTransform(Transform):
         else:
             raise ValueError("{} requires method to be 'open3d' or 'riconv'".format(type(self).__name__))
 
-    def _open3d_estimation(self, coordinates):
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(coordinates)
-        pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=self.knn))
-        normals = np.asarray(pcd.normals)
-        return np.hstack((coordinates, normals))
+    # def _open3d_estimation(self, coordinates):
+    #     pcd = o3d.geometry.PointCloud()
+    #     pcd.points = o3d.utility.Vector3dVector(coordinates)
+    #     pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=self.knn))
+    #     normals = np.asarray(pcd.normals)
+    #     return np.hstack((coordinates, normals))
 
     @staticmethod
     def _pc_normalize(pc):

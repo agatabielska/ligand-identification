@@ -1,12 +1,14 @@
 accum_iter: 1
-batch_size: 256
-dataset_dir: ../data/cryoem_blobs_uniform_2000_max
-dataset_file: ../data/merged.csv
+batch_size: 128
+# dataset_dir: ../data/thresholded_transform_probabilistic
+# dataset_dir: ../data/thresholded_transform_uniform
+dataset_dir: ../data/unthresholded_transform_probabilistic
+dataset_file: ../data/check.csv
 dataset_max_size: null
 dataset_min_size: null
 device: cuda
-epochs: 2
-lr: 0.002
+epochs: 50
+lr: 0.001
 model: MinkLoc3D
 no_workers: 4
 weight_decay: 1e-4

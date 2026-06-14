@@ -25,8 +25,7 @@ class BaseDataset(Dataset, ABC):
             rng_seed: int = 23,
             min_size: int = None,
             max_size: int = None,
-            normalize: bool = False,
-            load_in_memory: bool = False
+            normalize: bool = False
     ):
         """
         :param annotations_file_path: path to the directory containing directory
@@ -37,7 +36,6 @@ class BaseDataset(Dataset, ABC):
         :param max_size: maximal number of instances of each class present in the dataset
         :param min_size: minimal number of instances of each class present in the dataset
         :param normalize: whether to normalize the point cloud
-        :param load_in_memory: whether to preload all blobs into RAM for faster access
         """
         seed(rng_seed)
         self.annotations_file_path = annotations_file_path
@@ -63,7 +61,6 @@ class BaseDataset(Dataset, ABC):
         self.min_size = min_size
         self.max_size = max_size
         self.normalize = normalize
-        self.load_in_memory = load_in_memory
 
         
     def _get_blob(self, filename: str) -> torch.Tensor:
@@ -72,6 +69,8 @@ class BaseDataset(Dataset, ABC):
         blob_tensor = torch.tensor(blob_data, dtype=torch.float32)
         return blob_tensor
 
+    def get_filename(self, idx: int) -> str:
+        return self.files[idx]
 
     def sample(self, seed: int = None) -> None:
         """
@@ -270,3 +269,27 @@ def dataset_split(
     test.label_files_map = test_label_files_map
 
     return train, test
+
+
+def concatenate_sparse_datasets(datasets: List[SparseDataset]) -> SparseDataset:
+    """
+    Concatenates multiple SparseDataset instances into a single SparseDataset.
+
+    :param datasets: List of SparseDataset instances to concatenate
+    :return: A new SparseDataset instance containing all data from the input datasets
+    """
+    concatenated_dataset = deepcopy(datasets[0])
+    concatenated_dataset.files = []
+    concatenated_dataset.labels = []
+    concatenated_dataset.label_files_map = collections.defaultdict(list)
+
+    for dataset in datasets:
+        concatenated_dataset.files.extend(dataset.files)
+        concatenated_dataset.labels.extend(dataset.labels)
+        for k, v in dataset.label_files_map.items():
+            concatenated_dataset.label_files_map[k].extend(v)
+
+    concatenated_dataset.labels = torch.tensor(concatenated_dataset.labels, dtype=torch.float32)
+    concatenated_dataset.labels_names = concatenated_dataset.encoder.inverse_transform(concatenated_dataset.labels)
+
+    return concatenated_dataset
