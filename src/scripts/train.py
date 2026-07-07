@@ -1,4 +1,5 @@
 from src.models.clifford.model import CliffordSteerableNetwork
+from src.models.clifford_v2.model import CliffordSteerableNetwork as CliffordSteerableNetwork_v2
 from src.models.e3nn.model import E3NNPointCloudModel
 from src.pipeline.dataset import BlobDataset
 from pytorch_lightning.callbacks import (
@@ -78,7 +79,7 @@ def main(cfg: DictConfig):
     run_ckpt_dir = Path(cfg.paths.model_checkpoint) / wandb_logger.experiment.name
     run_ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-    if cfg.model.type == "clifford":
+    if cfg.model.type == "clifford" or cfg.model.type == "clifford_v2":
         transform = transform_clifford
     elif cfg.model.type == "e3nn":
         transform = transform_e3nn
@@ -130,6 +131,19 @@ def main(cfg: DictConfig):
 
     if cfg.model.type == "clifford":
         model = CliffordSteerableNetwork(
+            p=cfg.model.p,
+            q=cfg.model.q,
+            in_channels=cfg.model.in_channels,
+            hidden_channels=cfg.model.hidden_channels,
+            out_channels=cfg.train.out_channels,
+            n_shells=cfg.model.n_shells,
+            kernel_size=cfg.model.kernel_size,
+            learning_rate=cfg.train.learning_rate,
+            weight_decay=cfg.train.weight_decay,
+        )
+        
+    elif cfg.model.type == "clifford_v2":
+        model = CliffordSteerableNetwork_v2(
             p=cfg.model.p,
             q=cfg.model.q,
             in_channels=cfg.model.in_channels,
