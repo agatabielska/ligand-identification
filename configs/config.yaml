@@ -19,4 +19,7 @@ paths:
   data_dir: data/processed
   model_checkpoint: checkpoints/
 
+wandb:
+  run_name: null
+
 random_seed: 42

@@ -71,11 +71,14 @@ def get_dataloader(dataset, cfg, shuffle: bool):
 @hydra.main(config_path="../../configs", config_name="config", version_base=None)
 def main(cfg: DictConfig):
     set_seed(cfg.random_seed)
+    wandb_logger_kwargs = {
+        "project": "ligand-identification",
+        "config": OmegaConf.to_container(cfg, resolve=True),
+    }
+    if cfg.wandb.run_name is not None:
+        wandb_logger_kwargs["name"] = cfg.wandb.run_name
 
-    wandb_logger = WandbLogger(
-        project="ligand-identification",
-        config=OmegaConf.to_container(cfg, resolve=True),
-    )
+    wandb_logger = WandbLogger(**wandb_logger_kwargs)
     run_ckpt_dir = Path(cfg.paths.model_checkpoint) / wandb_logger.experiment.name
     run_ckpt_dir.mkdir(parents=True, exist_ok=True)
 
@@ -149,7 +152,6 @@ def main(cfg: DictConfig):
             in_channels=cfg.model.in_channels,
             hidden_channels=cfg.model.hidden_channels,
             out_channels=cfg.train.out_channels,
-            n_shells=cfg.model.n_shells,
             kernel_size=cfg.model.kernel_size,
             learning_rate=cfg.train.learning_rate,
             weight_decay=cfg.train.weight_decay,
