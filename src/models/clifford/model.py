@@ -193,12 +193,12 @@ class CliffordSteerableKernel(nn.Module):
         self.mask_weights = nn.Parameter(torch.ones(n_shells))
 
         # Learnable kernel head (final transformation)
-        # Takes (1, c_out*c_in, k, k, k) and outputs (1, c_out*c_in, k, k, k)
+        # Takes (1, c_out*c_in, k) and outputs (1, c_out*c_in, k)
         self.kernel_head = nn.Sequential(
-            nn.Conv3d(c_out * c_in, c_out * c_in, 1, groups=c_out),
+            nn.Conv1d(c_out * c_in, c_out * c_in, 1, groups=c_out),
             nn.GroupNorm(c_out, c_out * c_in),
             nn.GELU(),
-            nn.Conv3d(c_out * c_in, c_out * c_in, 1),
+            nn.Conv1d(c_out * c_in, c_out * c_in, 1),
         )
 
     def forward(self, spatial_grid: Optional[torch.Tensor] = None) -> torch.Tensor:
@@ -209,7 +209,7 @@ class CliffordSteerableKernel(nn.Module):
             spatial_grid: Optional spatial grid for kernel positions
 
         Returns:
-            k: Steerable kernel (c_out, c_in, kernel_size, kernel_size, kernel_size)
+            k: Steerable kernel (c_out, c_in, kernel_size)
         """
         device = self.eta.device
 
@@ -222,8 +222,6 @@ class CliffordSteerableKernel(nn.Module):
             self.c_out,
             self.c_in,
             self.dim_mv,
-            self.kernel_size,
-            self.kernel_size,
             self.kernel_size,
             device=device,
         )
@@ -263,9 +261,9 @@ class CliffordSteerableKernel(nn.Module):
                 )  # (c_out, c_in, dim_mv)
 
             # Broadcast to spatial dimensions
-            k_n = k_n.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+            k_n = k_n.unsqueeze(-1)
             k_n = k_n.expand(
-                -1, -1, -1, self.kernel_size, self.kernel_size, self.kernel_size
+                -1, -1, -1, self.kernel_size
             )
 
             # Apply learnable mask
@@ -273,28 +271,26 @@ class CliffordSteerableKernel(nn.Module):
             k_accum += self.mask_weights[shell_idx] * k_n * mask
 
         # Reshape for kernel head
-        # k_accum shape: (c_out, c_in, dim_mv, k, k, k)
+        # k_accum shape: (c_out, c_in, dim_mv, k)
         # We need to reduce dim_mv dimension for standard convolution
 
         # Option 1: Average over multivector components
-        k_reduced = k_accum.mean(dim=2)  # (c_out, c_in, k, k, k)
+        k_reduced = k_accum.mean(dim=2)  # (c_out, c_in, k)
 
         # Apply learnable kernel head transformation
-        # Input: (c_out, c_in, k, k, k)
+        # Input: (c_out, c_in, k)
         k_reshaped = k_reduced.reshape(
             1,
             self.c_out * self.c_in,
-            self.kernel_size,
-            self.kernel_size,
-            self.kernel_size,
+            self.kernel_size
         )
 
         # Use 3D conv to mix and transform kernel
-        k_transformed = self.kernel_head(k_reshaped)  # (1, c_out*c_in, k, k, k)
+        k_transformed = self.kernel_head(k_reshaped)  # (1, c_out*c_in, k)
 
         # Reshape to final kernel format
         k_final = k_transformed.reshape(
-            self.c_out, self.c_in, self.kernel_size, self.kernel_size, self.kernel_size
+            self.c_out, self.c_in, self.kernel_size
         )
 
         return k_final
@@ -303,7 +299,7 @@ class CliffordSteerableKernel(nn.Module):
         """Create coordinate grid for kernel positions."""
         coords = torch.arange(self.kernel_size, device=device)
         grid = torch.stack(
-            torch.meshgrid(coords, coords, coords, indexing="ij"), dim=-1
+            torch.meshgrid(coords, indexing="ij"), dim=-1
         )
         center = self.kernel_size // 2
         grid = grid - center  # Center at origin
@@ -320,7 +316,7 @@ class CliffordSteerableKernel(nn.Module):
         mask = torch.exp(-((dist - r) ** 2) / (2.0 * (0.5 + shell_idx * 0.2) ** 2))
 
         # Expand for channels and multivector dimensions
-        mask = mask.unsqueeze(0).unsqueeze(0).unsqueeze(0)  # (1, 1, 1, k, k, k)
+        mask = mask.unsqueeze(0).unsqueeze(0).unsqueeze(0) # (1, 1, 1, k)
 
         return mask
 
@@ -378,16 +374,16 @@ class CliffordSteerableConvolution(nn.Module):
         Apply learnable steerable convolution.
 
         Args:
-            F_in: Input feature map (B, c_in, D, H, W)
+            F_in: Input feature map (B, c_in, H)
 
         Returns:
-            F_out: Output feature map (B, c_out, D', H', W')
+            F_out: Output feature map (B, c_out, H'
         """
         # Generate learnable steerable kernel
-        k = self.kernel_gen()  # (c_out, c_in, k, k, k)
+        k = self.kernel_gen()  # (c_out, c_in, k)
 
         # Apply 3D convolution
-        F_out = F.conv3d(
+        F_out = F.conv1d(
             F_in, k, stride=self.stride, padding=self.padding, bias=self.bias
         )
 
@@ -439,7 +435,7 @@ class CliffordSteerableNetwork(pl.LightningModule):
         self.features = nn.Sequential(*layers)
 
         # Global pooling and classifier
-        self.pool = nn.AdaptiveAvgPool3d(1)
+        self.pool = nn.AdaptiveAvgPool1d(1)
         # TODO: Check if this additional Linear layer is necessary
         self.classifier = nn.Sequential(
             nn.Flatten(),

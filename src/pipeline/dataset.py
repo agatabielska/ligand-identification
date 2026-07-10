@@ -13,7 +13,7 @@ class BlobDataset(Dataset):
         transform=None,
         normalize=False,
         cache: bool = False,
-        num_workers: int = 4,
+        num_workers: int = 8,
         label_to_idx: dict = None,
     ):
         self.path = Path(path)

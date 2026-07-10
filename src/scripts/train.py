@@ -26,7 +26,7 @@ def transform_clifford(npz):
         mode="constant",
         constant_values=0,
     )
-    points = points.reshape(5, 20, 20, 3).transpose(3, 0, 1, 2)
+    points = points.transpose(1, 0)
     points = points.astype(np.float32)
     return torch.from_numpy(points)
 
