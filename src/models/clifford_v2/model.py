@@ -60,266 +60,145 @@ class ScalarShell(nn.Module):
 
         return s
 
-
-class CGENN(nn.Module):
+def get_clifford_cayley(p: int, q: int) -> torch.Tensor:
     """
-    Clifford Geometric Equivariant Neural Network.
-    Learnable network that processes multivectors.
+    Generates the 3D Cayley structure constant tensor \Lambda^c_{ab}
+    for the Clifford Algebra Cl(p, q).
+    Shape: (dim_mv, dim_mv, dim_mv)
     """
-
-    def __init__(self, dim_mv: int, c_in: int, c_out: int, hidden_dim: int = 64):
-        """
-        Args:
-            dim_mv: Dimension of multivector space (2^{p+q})
-            c_in: Input channels
-            c_out: Output channels
-            hidden_dim: Hidden layer dimension
-        """
-        super().__init__()
-        self.dim_mv = dim_mv
-        self.c_in = c_in
-        self.c_out = c_out
-
-        # Learnable weights for geometric product approximation
-        # We use MLPs that respect the geometric structure
-        self.mv_projection = nn.Sequential(
-            nn.Linear(dim_mv, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.GELU(),
-        )
-
-        # Channel mixing with geometric awareness
-        self.channel_mix = nn.Parameter(torch.randn(c_out, c_in, hidden_dim))
-        nn.init.xavier_uniform_(self.channel_mix)
-
-        # Output projection back to multivector space
-        self.output_proj = nn.Linear(hidden_dim, dim_mv)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: Input multivectors (..., dim_mv) or (..., c_in, dim_mv)
-        Returns:
-            Output multivectors (..., c_out, dim_mv)
-        """
-        # Process multivector structure
-        # x shape: (..., c_in, dim_mv)
-        x_proj = self.mv_projection(x)  # (..., c_in, hidden_dim)
-
-        # Mix channels with learned geometric operations
-        # Einstein sum over input channels and hidden dimensions
-        out = torch.einsum("...ih,oih->...oh", x_proj, self.channel_mix)
-
-        # Project back to multivector space
-        out = self.output_proj(out)  # (..., c_out, dim_mv)
-
-        return out
+    dim = p + q
+    dim_mv = 1 << dim
+    Lambda = torch.zeros(dim_mv, dim_mv, dim_mv)
+    
+    # Signature: +1 for the first p basis vectors, -1 for the next q
+    sig = [1] * p + [-1] * q
+    
+    for a in range(dim_mv):
+        for b in range(dim_mv):
+            sign = 1
+            # Extract active basis vectors for indices a and b
+            list_a = [i for i in range(dim) if (a & (1 << i))]
+            list_b = [i for i in range(dim) if (b & (1 << i))]
+            
+            # Count swaps needed to order the combined basis vectors
+            swaps = 0
+            for ia in list_a:
+                for ib in list_b:
+                    if ia > ib:
+                        swaps += 1
+            if swaps % 2 == 1:
+                sign *= -1
+                
+            # Account for squaring basis vectors according to the metric signature
+            for i in range(dim):
+                if (a & (1 << i)) and (b & (1 << i)):
+                    sign *= sig[i]
+            
+            # The resulting basis blade index is the XOR of a and b
+            c = a ^ b
+            Lambda[a, b, c] = sign
+            
+    return Lambda
 
 
 class CliffordSteerableKernel(nn.Module):
-    """
-    Function 2: CLIFFORDSTEERABLEKERNEL (Fully Learnable)
-    Constructs a steerable convolution kernel using Clifford algebra.
-    """
-
     def __init__(
-        self,
-        p: int,
-        q: int,
-        c_in: int,
-        c_out: int,
-        n_shells: int,
+        self, 
+        p: int, 
+        q: int, 
+        c_in: int, 
+        c_out: int, 
         kernel_size: int = 3,
-        n_sampling_points: int = 64,
-        hidden_dim: int = 64,
+        hidden_dim: int = 64
     ):
-        """
-        Args:
-            p, q: Clifford algebra signature
-            c_in: Input channels
-            c_out: Output channels
-            n_shells: Number of radial shells
-            kernel_size: Spatial kernel size
-            n_sampling_points: Points per shell
-            hidden_dim: Hidden dimension for CGENN
-        """
         super().__init__()
         self.p = p
         self.q = q
+        self.dim = p + q
+        self.dim_mv = 2 ** self.dim
         self.c_in = c_in
         self.c_out = c_out
-        self.n_shells = n_shells
         self.kernel_size = kernel_size
-
-        # Dimension of multivector space
-        self.dim_mv = 2 ** (p + q)
-
-        # Learnable radii for each shell
-        self.radii = nn.Parameter(torch.linspace(0.5, 2.0, n_shells))
-
-        # Learnable ScalarShells (one per shell)
-        self.scalar_shells = nn.ModuleList(
-            [
-                ScalarShell(p, q, n_sampling_points, learnable_sigma=True)
-                for _ in range(n_shells)
-            ]
-        )
-
-        # Learnable embedding networks (scalar + vector -> multivector)
-        self.embedders = nn.ModuleList(
-            [
-                nn.Sequential(
-                    nn.Linear(1 + p + q, hidden_dim),
-                    nn.GELU(),
-                    nn.Linear(hidden_dim, self.dim_mv),
-                )
-                for _ in range(n_shells)
-            ]
-        )
-
-        # Learnable CGENN for each shell
-        self.cgenn_nets = nn.ModuleList(
-            [CGENN(self.dim_mv, c_in, c_out, hidden_dim) for _ in range(n_shells)]
-        )
-
-        # Metric tensor
+        self.N = kernel_size ** self.dim 
+        
+        # 1. Automatically generate and register the Cayley Table
+        cayley_table = get_clifford_cayley(p, q)
+        self.register_buffer("Lambda", cayley_table) # Shape: (dim_mv, dim_mv, dim_mv)
+        
+        # Metric tensor η for the Scalar Shell
         eta_diag = torch.cat([torch.ones(p), -torch.ones(q)])
         self.register_buffer("eta", torch.diag(eta_diag))
 
-        # Learnable kernel mask weights
-        self.mask_weights = nn.Parameter(torch.ones(n_shells))
+        # 2. Weighted Cayley Initialization: w^c_{oiab} ~ N(0, 1 / sqrt(c_in * N))
+        std_dev = 1.0 / math.sqrt(self.c_in * self.N)
+        self.w_oiab = nn.Parameter(
+            torch.randn(c_out, c_in, self.dim_mv, self.dim_mv, self.dim_mv) * std_dev
+        )
 
-        # Learnable kernel head (final transformation)
-        # Takes (1, c_out*c_in, k) and outputs (1, c_out*c_in, k)
-        self.kernel_head = nn.Sequential(
-            nn.Conv1d(c_out * c_in, c_out * c_in, 1, groups=c_out),
-            nn.GroupNorm(c_out, c_out * c_in),
+        # 3. Global Scalar Shell Variance
+        self.sigma = nn.Parameter(torch.empty(1).uniform_(0.4, 0.6))
+        
+        # 4. Mask Kernel Variances (Per output/input channel pair)
+        self.sigma_mask = nn.Parameter(torch.empty(c_out, c_in).uniform_(0.4, 0.6))
+
+        # 5. Corrected CGENN (Coordinate Network / INR)
+        # Input: x_n = [s_n, v_n] -> Size: 1 (scalar) + (p+q) (vector)
+        # Output: Spatial kernel coefficients for every channel combination and basis blade
+        self.cgenn = nn.Sequential(
+            nn.Linear(1 + self.dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
             nn.GELU(),
-            nn.Conv1d(c_out * c_in, c_out * c_in, 1),
+            nn.Linear(hidden_dim, c_out * c_in * self.dim_mv)
         )
 
-    def forward(self, spatial_grid: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """
-        Construct learnable steerable kernel.
+    def _get_spatial_grid(self, device) -> torch.Tensor:
+        """Generates the localized coordinate grid v_n."""
+        coords = torch.linspace(-1.0, 1.0, self.kernel_size, device=device)
+        grid = torch.stack(torch.meshgrid(*(coords,) * self.dim, indexing="ij"), dim=-1)
+        return grid.reshape(-1, self.dim) # (N, p+q)
 
-        Args:
-            spatial_grid: Optional spatial grid for kernel positions
+    def forward(self) -> torch.Tensor:
+        device = self.w_oiab.device
+        v_n = self._get_spatial_grid(device) # (N, p+q)
 
-        Returns:
-            k: Steerable kernel (c_out, c_in, kernel_size)
-        """
-        device = self.eta.device
+        # --- Step 1: SCALARSHELL & EMBED ---
+        v_eta_v = torch.einsum("ni,ij,nj->n", v_n, self.eta, v_n)
+        s_n = torch.sign(v_eta_v) * torch.exp(-torch.abs(v_eta_v) / (2 * self.sigma**2))
+        x_n = torch.cat([s_n.unsqueeze(-1), v_n], dim=-1) # (N, 1+p+q)
 
-        # Create spatial grid for kernel
-        if spatial_grid is None:
-            spatial_grid = self._create_spatial_grid(device)
+        # --- Step 2: Evaluate Coordinate Network ---
+        k_hat = self.cgenn(x_n) # (N, c_out * c_in * dim_mv)
+        k_hat = k_hat.reshape(self.N, self.c_out, self.c_in, self.dim_mv)
 
-        # Initialize accumulated kernel
-        k_accum = torch.zeros(
-            self.c_out,
-            self.c_in,
-            self.dim_mv,
-            self.kernel_size,
-            device=device,
+        # --- Step 3: Compute & Apply Mask ---
+        mask_exp = torch.exp(
+            -torch.abs(v_eta_v.unsqueeze(1).unsqueeze(2)) / (2 * self.sigma_mask**2)
         )
+        mask = torch.sign(v_eta_v.unsqueeze(1).unsqueeze(2)) * mask_exp # (N, c_out, c_in)
+        k_hat = k_hat * mask.unsqueeze(-1) 
 
-        # Loop over learnable shells
-        for shell_idx in range(self.n_shells):
-            r = self.radii[shell_idx]
+        # --- Step 4: Kernel Head (Weighted Cayley Product) ---
+        # Combine the structural algebra constraints with the learnable weights
+        W_cayley = self.w_oiab * self.Lambda.unsqueeze(0).unsqueeze(0)
 
-            # Compute scalar shell features
-            s_n = self.scalar_shells[shell_idx](self.eta, r)  # (n_points,)
+        # Contract over the input basis dimension 'a'
+        # k_hat: (N, c_out, c_in, a) | W_cayley: (c_out, c_in, a, b, c) -> (N, c_out, c_in, b, c)
+        k = torch.einsum('noia, oiabc -> noibc', k_hat, W_cayley)
 
-            # Get sampling points
-            v_n = F.normalize(self.scalar_shells[shell_idx].sampling_points, dim=-1)
-
-            # Embed scalars and vectors as multivectors
-            sv_concat = torch.cat([s_n.unsqueeze(-1), v_n], dim=-1)  # (n_points, 1+p+q)
-            x_n = self.embedders[shell_idx](sv_concat)  # (n_points, dim_mv)
-
-            # Aggregate over sampling points first (mean pooling)
-            x_n_agg = x_n.mean(dim=0)  # (dim_mv,)
-
-            # Expand for input channels: (c_in, dim_mv)
-            x_n_agg = x_n_agg.unsqueeze(0).expand(self.c_in, -1)  # (c_in, dim_mv)
-
-            # Apply CGENN - it will handle the shape internally
-            k_n = self.cgenn_nets[shell_idx](
-                x_n_agg
-            )  # Should output (c_in, c_out, dim_mv)
-
-            # Check shape and permute if needed
-            if len(k_n.shape) == 3:
-                k_n = k_n.permute(1, 0, 2)  # (c_out, c_in, dim_mv)
-            else:
-                # If shape is (c_out, dim_mv), expand for c_in
-                k_n = k_n.unsqueeze(1).expand(
-                    -1, self.c_in, -1
-                )  # (c_out, c_in, dim_mv)
-
-            # Broadcast to spatial dimensions
-            k_n = k_n.unsqueeze(-1)
-            k_n = k_n.expand(
-                -1, -1, -1, self.kernel_size
-            )
-
-            # Apply learnable mask
-            mask = self._compute_learnable_mask(spatial_grid, r, shell_idx)
-            k_accum += self.mask_weights[shell_idx] * k_n * mask
-
-        # Reshape for kernel head
-        # k_accum shape: (c_out, c_in, dim_mv, k)
-        # We need to reduce dim_mv dimension for standard convolution
-
-        # Option 1: Average over multivector components
-        k_reduced = k_accum.mean(dim=2)  # (c_out, c_in, k)
-
-        # Apply learnable kernel head transformation
-        # Input: (c_out, c_in, k)
-        k_reshaped = k_reduced.reshape(
-            1,
-            self.c_out * self.c_in,
-            self.kernel_size
-        )
-
-        # Use 3D conv to mix and transform kernel
-        k_transformed = self.kernel_head(k_reshaped)  # (1, c_out*c_in, k)
-
-        # Reshape to final kernel format
-        k_final = k_transformed.reshape(
-            self.c_out, self.c_in, self.kernel_size
+        # --- Step 5: Reshape to Standard Convolutions Matrix ---
+        # Rearrange dimensions to merge channels with Clifford basis dimensions
+        k_final = k.permute(1, 4, 2, 3, 0) # (c_out, c, c_in, b, N)
+        spatial_dims = (self.kernel_size,) * self.dim
+        
+        # Flatten into standard weight shapes: (c_out * 2^d, c_in * 2^d, K, K, K)
+        k_final = k_final.reshape(
+            self.c_out * self.dim_mv, 
+            self.c_in * self.dim_mv, 
+            *spatial_dims
         )
 
         return k_final
-
-    def _create_spatial_grid(self, device):
-        """Create coordinate grid for kernel positions."""
-        coords = torch.arange(self.kernel_size, device=device)
-        grid = torch.stack(
-            torch.meshgrid(coords, indexing="ij"), dim=-1
-        )
-        center = self.kernel_size // 2
-        grid = grid - center  # Center at origin
-        return grid.float()
-
-    def _compute_learnable_mask(
-        self, spatial_grid: torch.Tensor, r: float, shell_idx: int
-    ):
-        """Compute learnable geometric mask."""
-        # Distance from center
-        dist = torch.norm(spatial_grid, dim=-1)
-
-        # Learnable Gaussian-like mask
-        mask = torch.exp(-((dist - r) ** 2) / (2.0 * (0.5 + shell_idx * 0.2) ** 2))
-
-        # Expand for channels and multivector dimensions
-        mask = mask.unsqueeze(0).unsqueeze(0).unsqueeze(0) # (1, 1, 1, k)
-
-        return mask
-
+    
 
 class CliffordSteerableConvolution(nn.Module):
     """
@@ -374,16 +253,16 @@ class CliffordSteerableConvolution(nn.Module):
         Apply learnable steerable convolution.
 
         Args:
-            F_in: Input feature map (B, c_in, H)
+            F_in: Input feature map (B, c_in, D, H, W)
 
         Returns:
-            F_out: Output feature map (B, c_out, H'
+            F_out: Output feature map (B, c_out, D', H', W')
         """
         # Generate learnable steerable kernel
-        k = self.kernel_gen()  # (c_out, c_in, k)
+        k = self.kernel_gen()  # (c_out, c_in, k, k, k)
 
         # Apply 3D convolution
-        F_out = F.conv1d(
+        F_out = F.conv3d(
             F_in, k, stride=self.stride, padding=self.padding, bias=self.bias
         )
 
@@ -435,7 +314,7 @@ class CliffordSteerableNetwork(pl.LightningModule):
         self.features = nn.Sequential(*layers)
 
         # Global pooling and classifier
-        self.pool = nn.AdaptiveAvgPool1d(1)
+        self.pool = nn.AdaptiveAvgPool3d(1)
         # TODO: Check if this additional Linear layer is necessary
         self.classifier = nn.Sequential(
             nn.Flatten(),

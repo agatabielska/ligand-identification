@@ -3,61 +3,173 @@ from src.utils.sampling_strategies import (
     ProbabilisticSelectionTransform,
     SpatialNormalization3,
 )
-from concurrent.futures import ThreadPoolExecutor, wait
-from sklearn.model_selection import train_test_split
-from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, wait, as_completed
+from sklearn.model_selection import StratifiedGroupKFold
 from typing import List, Tuple
 from pathlib import Path
 import numpy as np
 import argparse
 
 
-def load_folders(
-    train_folder_paths: list[Path], test_folder_paths: list[Path]
-) -> Tuple[List[Path], List[int], List[Path], List[int]]:
-    for folder_path in [*train_folder_paths, *test_folder_paths]:
+def extract_pdb_id(file_path: Path) -> str:
+    """Extract PDB ID (molecule) from filename - first part of file name."""
+    return file_path.stem.split("_")[0].upper()
+
+
+def load_folders(folder_paths: list[Path]) -> Tuple[List[Path], List[str], List[str]]:
+    """
+    Load all NPZ files from the given folders which are ligand classes, and extracts molecule IDs from filenames.
+    Returns three parallel lists: file paths, ligand class labels, and molecule IDs (PDB IDs) for stratified group splitting.
+    """
+
+    for folder_path in folder_paths:
         if not folder_path.exists():
             raise ValueError(f"Folder not found: {folder_path}")
 
-    train_class_dirs = []
-    for train_folder_path in train_folder_paths:
-        train_class_dirs.extend([d for d in train_folder_path.iterdir() if d.is_dir()])
+    all_files_paths:  List[Path] = []
+    ligand_names: List[str]  = []
+    pdb_ids: List[str]  = []
 
-    test_class_dirs = []
-    for test_folder_path in test_folder_paths:
-        test_class_dirs.extend([d for d in test_folder_path.iterdir() if d.is_dir()])
+    for folder_path in folder_paths:
+        for ligand_dir in sorted(folder_path.iterdir()):
+            if not ligand_dir.is_dir():
+                continue
+            ligand_name = ligand_dir.name
+            for f in sorted(ligand_dir.glob("*.npz")):
+                all_files_paths.append(f)
+                ligand_names.append(ligand_name)
+                pdb_ids.append(extract_pdb_id(f))
 
-    unique_class_names = set()
-    unique_class_names.update([d.name for d in train_class_dirs])
-    unique_class_names.update([d.name for d in test_class_dirs])
-    unique_class_names = list(sorted(unique_class_names))
+    return all_files_paths, ligand_names, pdb_ids
 
-    class_name_to_label = {name: idx for idx, name in enumerate(unique_class_names)}
 
-    train_files = []
-    train_labels = []
-    for class_dir in train_class_dirs:
-        label = class_name_to_label[class_dir.name]
-        files = list(class_dir.glob("*.npz"))
-        train_files.extend(files)
-        train_labels.extend([label] * len(files))
+def stratified_group_split(
+    files: List[Path],
+    labels: List[str],
+    groups: List[str],
+    n_splits: int,
+    random_state: int,
+) -> Tuple[List[Path], List[str], List[Path], List[str], List[Path], List[str]]:
+       
+    files_arr  = np.array(files,  dtype=object)
+    ligand_names = np.array(labels, dtype=object)
+    pdb_ids = np.array(groups, dtype=object)
 
-    test_files = []
-    test_labels = []
-    for class_dir in test_class_dirs:
-        label = class_name_to_label[class_dir.name]
-        files = list(class_dir.glob("*.npz"))
-        test_files.extend(files)
-        test_labels.extend([label] * len(files))
+    # Splits based on groups (PDB IDs) and stratified by ligand names
+    iterator = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+    folds = list(iterator.split(files_arr, ligand_names, pdb_ids))
 
-    return train_files, train_labels, test_files, test_labels
+    # Look for the best split that has the most classes in the intersection of train/val/test sets to maximize class representation across splits
+    best_indices = None
+    most_classes = 0
+    for test_fold_idx in range(n_splits):
+        for val_fold_idx in range(test_fold_idx + 1, n_splits):
+            # Split into n_splits folds, takes fold 0 as test, fold 1 as val, and the rest as train
+            test_idx  = folds[test_fold_idx][1]
+            val_idx   = folds[val_fold_idx][1]
+
+            # Train: remaining files not in test or val
+            exclude   = set(test_idx) | set(val_idx)
+            train_idx = [i for i in range(len(files_arr)) if i not in exclude]
+
+            train_files  = files_arr[train_idx]
+            train_labels = ligand_names[train_idx]
+            val_files    = files_arr[val_idx]
+            val_labels   = ligand_names[val_idx]
+            test_files   = files_arr[test_idx]
+            test_labels  = ligand_names[test_idx]
+            
+            # check the size of class intersection
+            train_classes = set(train_labels)
+            val_classes   = set(val_labels)
+            test_classes  = set(test_labels)
+            
+            intersection = train_classes & val_classes & test_classes
+            
+            if len(intersection) > most_classes:
+                most_classes = len(intersection)
+                best_indices = (test_fold_idx, val_fold_idx)
+    
+    print(f"Best split found with {most_classes} classes in intersection (Test fold: {best_indices[0]}, Val fold: {best_indices[1]})")
+    
+    test_idx  = folds[best_indices[0]][1]
+    val_idx   = folds[best_indices[1]][1]
+    exclude   = set(test_idx) | set(val_idx)
+    train_idx = [i for i in range(len(files_arr)) if i not in exclude]
+    
+    train_files  = files_arr[train_idx]
+    train_labels = ligand_names[train_idx]
+    val_files    = files_arr[val_idx]
+    val_labels   = ligand_names[val_idx]
+    test_files   = files_arr[test_idx]
+    test_labels  = ligand_names[test_idx]
+    
+    # Check if intersection is lower than the union
+    train_classes = set(train_labels)
+    val_classes   = set(val_labels)
+    test_classes  = set(test_labels)
+    intersection = train_classes & val_classes & test_classes
+    union = train_classes | val_classes | test_classes
+    if len(intersection) < len(union):
+        # Remove classes that are not in the intersection from ligand_groups.txt
+        ligand_groups_path = Path("data/ligand_groups.txt")
+        if not ligand_groups_path.exists():
+            raise ValueError(f"ligand_groups.txt not found at {ligand_groups_path}")
+        else:
+            counter = 0
+            with ligand_groups_path.open("r") as f:
+                lines = f.readlines()
+            with ligand_groups_path.open("w") as f:
+                for line in lines:
+                    ligand_name = line.split()[0]
+                    if ligand_name in intersection:
+                        f.write(line)
+                        counter += 1
+            print(f"Removed {len(union) - len(intersection)} classes from ligand_groups.txt, kept {counter} classes that are present in all splits.")
+        # Run filter_cryoem_classes.sh to remove files from classes that are not in the intersection
+        print("Running filter_cryoem_classes.sh to remove files from classes that are not in the intersection...")
+        filter_script = Path("src/scripts/filter_cryoem_classes.sh")
+        if not filter_script.exists():
+            raise ValueError(f"filter_cryoem_classes.sh not found at {filter_script}")
+        else:
+            import subprocess
+            subprocess.run(["bash", str(filter_script), args.raw_data_dir], check=True)
+            print("Finished running filter_cryoem_classes.sh. Please re-run this script to load the updated files and splits.")
+        
+    removed_classes = union - intersection
+    # iterate through the ligand_names and if the ligand name is in removed_classes, change it to rare
+    # Why don't we just create splits again? it creates different splits resulting in less and less classes in each run
+    for i in range(len(train_labels)):
+        if train_labels[i] in removed_classes:
+            train_labels[i] = "rare"
+            file_path = train_files[i]
+            # Change the file path to point to the rare directory
+            train_files[i] = file_path.parent.parent / "rare" / file_path.name
+    for i in range(len(val_labels)):
+        if val_labels[i] in removed_classes:
+            val_labels[i] = "rare"
+            file_path = val_files[i]
+            # Change the file path to point to the rare directory
+            val_files[i] = file_path.parent.parent / "rare" / file_path.name
+    for i in range(len(test_labels)):
+        if test_labels[i] in removed_classes:
+            test_labels[i] = "rare"
+            file_path = test_files[i]
+            # Change the file path to point to the rare directory
+            test_files[i] = file_path.parent.parent / "rare" / file_path.name
+    
+    return (
+        list(train_files), list(train_labels),
+        list(val_files),   list(val_labels),
+        list(test_files),  list(test_labels),
+    )
 
 
 def preprocess(
     file_paths: List[Path],
-    file_labels: List[int],
+    file_labels: List[str],
     output_path: Path,
-    transform_stack="probabilistic",
+    transform_stack: str = "probabilistic",
 ) -> None:
     if transform_stack == "uniform":
         transforms = [UniformSelectionTransform(max_blob_size=2000, method="max")]
@@ -71,7 +183,7 @@ def preprocess(
     else:
         raise ValueError(f"Unknown transform stack: {transform_stack}")
 
-    for file_path, label in zip(file_paths, file_labels):
+    for file_path, ligand_name in zip(file_paths, file_labels):
         data = np.load(file_path)
         keys = list(data.keys())
         if len(keys) != 1:
@@ -82,11 +194,12 @@ def preprocess(
         blob = data[keys[0]]
         for transform in transforms:
             blob = transform.preprocess(blob)
-        idx = np.argwhere(blob > 0)
+        idx    = np.argwhere(blob > 0)
         values = blob[blob > 0]
         processed_data = {"indices": idx, "values": values, "shape": blob.shape}
-        (output_path / str(label)).mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(output_path / str(label) / file_path.name, **processed_data)
+
+        (output_path / ligand_name).mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(output_path / ligand_name / file_path.name, **processed_data)
 
     print(f"Processed {len(file_paths)} files and saved to {output_path}")
 
@@ -96,46 +209,15 @@ def chunk(items, labels, size):
         yield items[i : i + size], labels[i : i + size]
 
 
-def handle_single_example(
-    file_paths: List[Path], file_labels: List[int], strategy: str = "remove"
-) -> Tuple[List[Path], List[int]]:
-    new_paths = []
-    new_labels = []
-    counter = Counter(file_labels)
-
-    for path, label in zip(file_paths, file_labels):
-        if counter[label] == 1:
-            print(f"Class {label} has a single example: {path}")
-            if strategy == "remove":
-                continue
-            elif strategy == "duplicate":
-                new_paths.append(path)
-                new_labels.append(label)
-            else:
-                raise ValueError(f"Unknown strategy: {strategy}")
-        new_paths.append(path)
-        new_labels.append(label)
-
-    return new_paths, new_labels
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Preprocess data and save it to a file."
     )
     parser.add_argument(
-        "--train-folders",
+        "--raw-data-dir",
         type=str,
         required=True,
-        help="Paths to training data folders.",
-        nargs="+",
-    )
-    parser.add_argument(
-        "--test-folders",
-        type=str,
-        required=True,
-        help="Paths to testing data folders.",
-        nargs="+",
+        help="Path to the raw data directory."
     )
     parser.add_argument(
         "--chunk-size",
@@ -156,71 +238,89 @@ if __name__ == "__main__":
         help="Path to the output folder where preprocessed data will be saved.",
     )
     parser.add_argument(
-        "--test-size", type=float, default=0.25, help="Proportion of test data."
+        "--n-splits",
+        type=int,
+        default=5,
+        help="Number of splits for StratifiedGroupKFold.",
     )
     parser.add_argument(
-        "--single-example-strategy",
-        type=str,
-        choices=["remove", "duplicate"],
-        default="remove",
-        help="Strategy to handle classes with a single example.",
+        "--random-state",
+        type=int,
+        default=42,
+        help="Random seed for reproducibility.",
     )
     args = parser.parse_args()
 
-    output_folder = Path(args.output_folder)
+    output_folder = Path(args.output_folder + f"_transform_{args.transform_stack}")
     output_folder.mkdir(parents=True, exist_ok=True)
+    
+    # Run get_frequent_groups.sh and filter_cryoem_classes.sh
+    print("Running get_frequent_groups.sh to identify frequent ligand classes...")
+    get_groups_script = Path("src/scripts/get_frequent_groups.sh")
+    if not get_groups_script.exists():
+        raise ValueError(f"get_frequent_groups.sh not found at {get_groups_script}")
+    else:
+        import subprocess
+        subprocess.run(["bash", str(get_groups_script)], check=True)
+        print("Finished running get_frequent_groups.sh.")
+    print("Running filter_cryoem_classes.sh to filter classes based on frequency...")
+    filter_script = Path("src/scripts/filter_cryoem_classes.sh")
+    if not filter_script.exists():
+        raise ValueError(f"filter_cryoem_classes.sh not found at {filter_script}")
+    else:
+        import subprocess
+        subprocess.run(["bash", str(filter_script), args.raw_data_dir], check=True)
+        print("Finished running filter_cryoem_classes.sh.")
+        
+    filtered_data_dir = Path(f"data/filtered_{args.raw_data_dir}")
+    if not filtered_data_dir.exists():
+        raise ValueError(f"Filtered data directory not found: {filtered_data_dir}. Please run filter_cryoem_classes.sh to create it.")
 
-    train_files, train_labels, test_files, test_labels = load_folders(
-        [Path(path) for path in args.train_folders],
-        [Path(path) for path in args.test_folders],
-    )
+    # Load all files into flat lists
+    all_files, all_labels, all_groups = load_folders([filtered_data_dir])
+    print(f"Total files   : {len(all_files)}")
+    print(f"Total classes : {len(set(all_labels))}")
+    print(f"Unique PDB IDs: {len(set(all_groups))}")
 
-    train_files, train_labels = handle_single_example(
-        train_files, train_labels, strategy=args.single_example_strategy
-    )
+    # Splits into train/val/test with stratification by ligand class and grouping by PDB ID
+    train_files, train_labels, val_files, val_labels, test_files, test_labels = \
+        stratified_group_split(
+            all_files, all_labels, all_groups,
+            n_splits=args.n_splits,
+            random_state=args.random_state,
+        )
 
-    train_files, val_files, train_labels, val_labels = train_test_split(
-        train_files,
-        train_labels,
-        test_size=args.test_size,
-        stratify=train_labels,
-        random_state=42,
-    )
-
-    print(
-        f"Found {len(train_files)} training files and {len(test_files)} testing files."
-    )
+    print(f"\nSplit sizes:")
+    print(f"  Train : {len(train_files)} files  ({len(set(train_labels))} classes)")
+    print(f"  Val   : {len(val_files)} files  ({len(set(val_labels))} classes)")
+    print(f"  Test  : {len(test_files)} files  ({len(set(test_labels))} classes)")
 
     futures = []
     with ThreadPoolExecutor() as pool:
         for sublist, sublabels in chunk(train_files, train_labels, args.chunk_size):
-            futures.append(
-                pool.submit(
-                    preprocess,
-                    sublist,
-                    sublabels,
-                    output_folder / "train",
-                    transform_stack=args.transform_stack,
-                )
-            )
+            futures.append(pool.submit(
+                preprocess, sublist, sublabels,
+                output_folder / "train",
+                transform_stack=args.transform_stack,
+            ))
         for sublist, sublabels in chunk(val_files, val_labels, args.chunk_size):
-            futures.append(
-                pool.submit(
-                    preprocess,
-                    sublist,
-                    sublabels,
-                    output_folder / "val",
-                    transform_stack=args.transform_stack,
-                )
-            )
+            futures.append(pool.submit(
+                preprocess, sublist, sublabels,
+                output_folder / "val",
+                transform_stack=args.transform_stack,
+            ))
         for sublist, sublabels in chunk(test_files, test_labels, args.chunk_size):
-            futures.append(
-                pool.submit(
-                    preprocess,
-                    sublist,
-                    sublabels,
-                    output_folder / "test",
-                    transform_stack=args.transform_stack,
-                )
-            )
+            futures.append(pool.submit(
+                preprocess, sublist, sublabels,
+                output_folder / "test",
+                transform_stack=args.transform_stack,
+            ))            
     wait(futures)
+    
+    # Remove filtered_data_dir and ligand_groups.txt
+    if filtered_data_dir.exists():
+        import shutil
+        shutil.rmtree(filtered_data_dir)
+    ligand_groups_path = Path("data/ligand_groups.txt")
+    if ligand_groups_path.exists():
+        ligand_groups_path.unlink()
