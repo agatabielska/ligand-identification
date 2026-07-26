@@ -30,9 +30,9 @@ class ScalarShell(nn.Module):
 
         # Learnable sigma parameter
         if learnable_sigma:
-            self.sigma = nn.Parameter(torch.ones(1))
+            self.sigma = nn.Parameter(torch.empty(1).uniform_(0.4, 0.6))
         else:
-            self.register_buffer("sigma", torch.ones(1))
+            self.register_buffer("sigma", torch.empty(1).uniform_(0.4, 0.6))
 
         # Learnable sampling points on unit sphere (normalized during forward)
         self.sampling_points = nn.Parameter(torch.randn(n_points, self.dim))
@@ -51,11 +51,14 @@ class ScalarShell(nn.Module):
 
         # Compute metric: η^pq(v,v)
         # eta_vv = v^T @ eta @ v for each point
-        eta_vv = torch.einsum("ni,ij,nj->n", v, eta_pq, v)
+        # We use normalized v, so this formula yields unit length in the metric space
+        eta_unit = torch.einsum("ni,ij,nj->n", v, eta_pq, v)
+        
+        eta_vv = r**2 * eta_unit  # Scale by radius squared
 
-        # s ← sgn(η^pq(v,v)) · exp(-(|η^pq(v,v)| - r)^2 / (2σ^2))
+        # s ← sgn(η^pq(v,v)) · exp(-|η^pq(v,v)| / (2σ^2))
         s = torch.sign(eta_vv) * torch.exp(
-            -(torch.abs(eta_vv) - r**2) / (2 * self.sigma**2)
+            -torch.abs(eta_vv) / (2 * self.sigma**2)
         )
 
         return s
