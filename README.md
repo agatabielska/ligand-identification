@@ -13,30 +13,18 @@ uv sync
 uv run streamlit run src/visualizations/blob_visualization.py
 ```
 
-# To prepare data for the model
-### Download xray training and holdout mapping
-```bash
-./src/scripts/download_xray_mapping.sh
-```
-### Download and unpack blobs
-X-ray:
-```bash
-./src/scripts/download_xray_blobs.sh
-```
-
-CryoEM:
+# NEW, CryoEM only class grouping
 ```bash
 ./src/scripts/download_cryoem_blobs.sh
+uv run -m src.scripts.preprocess --raw-data-dir "cryoem_blobs" --output-folder "data/thresholded" --transform-stack "probabilistic"
 ```
-
-### Group blobs into classes according to xray mapping (run group_xray_blobs.sh first)
-X-ray:
+To remove unnecessary files from NoThresholdBlobs run:
 ```bash
-./src/scripts/group_xray_blobs.sh
+uv run -m src.scripts.trim_unthresholded
 ```
-CryoEM:
+And then to filter the classes:
 ```bash
-./src/scripts/group_cryoem_blobs.sh
+uv run -m src.scripts.preprocess --raw-data-dir "NoThresholdBlobs" --output-folder "data/unthresholded" --transform-stack "probabilistic"
 ```
 
-
+Resulting groupings will be in `data/filtered_cryoem_classes/`

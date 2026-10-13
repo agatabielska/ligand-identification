@@ -13,7 +13,8 @@ class BlobDataset(Dataset):
         transform=None,
         normalize=False,
         cache: bool = False,
-        num_workers: int = 4,
+        num_workers: int = 8,
+        label_to_idx: dict = None,
     ):
         self.path = Path(path)
         self.cache = cache
@@ -21,11 +22,17 @@ class BlobDataset(Dataset):
         self.normalize = normalize
         self.samples = []
         self.num_workers = num_workers
-        for class_dir in self.path.iterdir():
-            if class_dir.is_dir():
-                for file in class_dir.glob("*.npz"):
-                    self.samples.append((file, int(class_dir.name)))
 
+        class_dirs = sorted([d for d in self.path.iterdir() if d.is_dir()])
+        if label_to_idx is not None:
+            self.label_to_idx = label_to_idx
+        else:
+            self.label_to_idx = {d.name: idx for idx, d in enumerate(class_dirs)}
+
+        for class_dir in class_dirs:
+            label = self.label_to_idx[class_dir.name]
+            for file in class_dir.glob("*.npz"):
+                self.samples.append((file, label))
         if self.cache:
             self.cached_data = []
             with ThreadPoolExecutor(max_workers=self.num_workers) as executor:

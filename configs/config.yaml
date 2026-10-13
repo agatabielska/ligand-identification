@@ -6,7 +6,7 @@ defaults:
 train:
   epochs: 100
   learning_rate: 1e-3
-  out_channels: 219
+  out_channels: 97
   normalize_data: true
   weight_decay: 1e-4
   gradient_clip_val: null
@@ -16,9 +16,10 @@ train:
     monitor: val_loss
 
 paths:
-  train_data: data/processed/train
-  val_data: data/processed/val
-  test_data: data/processed/test
+  data_dir: data/processed
   model_checkpoint: checkpoints/
+
+wandb:
+  run_name: null
 
 random_seed: 42

@@ -25,7 +25,7 @@ def transform_clifford(npz):
         mode="constant",
         constant_values=0,
     )
-    points = points.reshape(5, 20, 20, 3).transpose(3, 0, 1, 2)
+    points = points.transpose(1, 0)
     points = points.astype(np.float32)
     return torch.from_numpy(points)
 
@@ -45,13 +45,14 @@ def transform_e3nn(npz):
     return torch.from_numpy(points)
 
 
-def get_dataset(path: str, cfg, transform):
+def get_dataset(path: Path, cfg, transform, label_to_idx: dict):
     return BlobDataset(
-        path=path,
+        path=str(path),
         transform=transform,
         normalize=cfg.train.normalize_data,
         cache=cfg.machine.cache_dataset,
         num_workers=cfg.machine.num_workers,
+        label_to_idx=label_to_idx,
     )
 
 
@@ -69,25 +70,35 @@ def get_dataloader(dataset, cfg, shuffle: bool):
 @hydra.main(config_path="../../configs", config_name="config", version_base=None)
 def main(cfg: DictConfig):
     set_seed(cfg.random_seed)
+    wandb_logger_kwargs = {
+        "project": "ligand-identification",
+        "config": OmegaConf.to_container(cfg, resolve=True),
+    }
+    if cfg.wandb.run_name is not None:
+        wandb_logger_kwargs["name"] = cfg.wandb.run_name
 
-    wandb_logger = WandbLogger(
-        project="ligand-identification",
-        config=OmegaConf.to_container(cfg, resolve=True),
-    )
+    wandb_logger = WandbLogger(**wandb_logger_kwargs)
     run_ckpt_dir = Path(cfg.paths.model_checkpoint) / wandb_logger.experiment.name
     run_ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-    if cfg.model.type == "clifford":
+    if cfg.model.type == "clifford" or cfg.model.type == "clifford_v2":
         transform = transform_clifford
     elif cfg.model.type == "e3nn":
         transform = transform_e3nn
     else:
         raise ValueError(f"Unknown model type: {cfg.model.type}")
 
-    train_dataset = get_dataset(cfg.paths.train_data, cfg, transform)
-    val_dataset = get_dataset(cfg.paths.val_data, cfg, transform)
-    test_dataset = get_dataset(cfg.paths.test_data, cfg, transform)
+    all_classes = sorted(set(
+        d.name
+        for folder_name in ["train", "val", "test"]
+        for d in (Path(cfg.paths.data_dir) / folder_name).iterdir()
+        if d.is_dir()
+    ))
+    label_to_idx = {name: idx for idx, name in enumerate(all_classes)}
 
+    train_dataset = get_dataset(Path(cfg.paths.data_dir) / "train", cfg, transform, label_to_idx)
+    val_dataset   = get_dataset(Path(cfg.paths.data_dir) / "val",   cfg, transform, label_to_idx)
+    test_dataset  = get_dataset(Path(cfg.paths.data_dir) / "test",  cfg, transform, label_to_idx)
     train_dataloader = get_dataloader(train_dataset, cfg, shuffle=True)
     val_dataloader = get_dataloader(val_dataset, cfg, shuffle=False)
     test_dataloader = get_dataloader(test_dataset, cfg, shuffle=False)
