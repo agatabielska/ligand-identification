@@ -204,12 +204,9 @@ class CliffordSteerableKernel(nn.Module):
             nn.Conv1d(c_out * c_in, c_out * c_in, 1),
         )
 
-    def forward(self, spatial_grid: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(self) -> torch.Tensor:
         """
         Construct learnable steerable kernel.
-
-        Args:
-            spatial_grid: Optional spatial grid for kernel positions
 
         Returns:
             k: Steerable kernel (c_out, c_in, kernel_size)
@@ -217,8 +214,7 @@ class CliffordSteerableKernel(nn.Module):
         device = self.eta.device
 
         # Create spatial grid for kernel
-        if spatial_grid is None:
-            spatial_grid = self._create_spatial_grid(device)
+        spatial_grid = self._create_spatial_grid(device)
 
         # Initialize accumulated kernel
         k_accum = torch.zeros(
