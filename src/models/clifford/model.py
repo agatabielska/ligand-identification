@@ -104,7 +104,7 @@ class CGENN(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            x: Input multivectors (..., dim_mv) or (..., c_in, dim_mv)
+            x: Input multivectors (..., c_in, dim_mv) or (c_in, dim_mv)
         Returns:
             Output multivectors (..., c_out, dim_mv)
         """
@@ -195,30 +195,25 @@ class CliffordSteerableKernel(nn.Module):
         # Learnable kernel mask weights
         self.mask_weights = nn.Parameter(torch.ones(n_shells))
 
-        # Learnable kernel head (final transformation)
-        # Takes (1, c_out*c_in, k) and outputs (1, c_out*c_in, k)
+        total_features = c_out * c_in * self.dim_mv
         self.kernel_head = nn.Sequential(
-            nn.Conv1d(c_out * c_in, c_out * c_in, 1, groups=c_out),
-            nn.GroupNorm(c_out, c_out * c_in),
+            nn.Conv1d(total_features, total_features, 1, groups=c_out),
+            nn.GroupNorm(c_out, total_features),
             nn.GELU(),
-            nn.Conv1d(c_out * c_in, c_out * c_in, 1),
+            nn.Conv1d(total_features, total_features, 1),
         )
 
-    def forward(self, spatial_grid: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(self) -> torch.Tensor:
         """
         Construct learnable steerable kernel.
-
-        Args:
-            spatial_grid: Optional spatial grid for kernel positions
-
+        
         Returns:
             k: Steerable kernel (c_out, c_in, kernel_size)
         """
         device = self.eta.device
 
         # Create spatial grid for kernel
-        if spatial_grid is None:
-            spatial_grid = self._create_spatial_grid(device)
+        spatial_grid = self._create_spatial_grid(device)
 
         # Initialize accumulated kernel
         k_accum = torch.zeros(
@@ -232,68 +227,42 @@ class CliffordSteerableKernel(nn.Module):
         # Loop over learnable shells
         for shell_idx in range(self.n_shells):
             r = self.radii[shell_idx]
-
-            # Compute scalar shell features
-            s_n = self.scalar_shells[shell_idx](self.eta, r)  # (n_points,)
-
-            # Get sampling points
+            s_n = self.scalar_shells[shell_idx](self.eta, r)
             v_n = F.normalize(self.scalar_shells[shell_idx].sampling_points, dim=-1)
 
-            # Embed scalars and vectors as multivectors
-            sv_concat = torch.cat([s_n.unsqueeze(-1), v_n], dim=-1)  # (n_points, 1+p+q)
-            x_n = self.embedders[shell_idx](sv_concat)  # (n_points, dim_mv)
+            sv_concat = torch.cat([s_n.unsqueeze(-1), v_n], dim=-1)
+            x_n = self.embedders[shell_idx](sv_concat)
+            x_n_agg = x_n.mean(dim=0).unsqueeze(0).expand(self.c_in, -1)  # (c_in, dim_mv)
 
-            # Aggregate over sampling points first (mean pooling)
-            x_n_agg = x_n.mean(dim=0)  # (dim_mv,)
+            k_n = self.cgenn_nets[shell_idx](x_n_agg)  # (c_out, dim_mv)
 
-            # Expand for input channels: (c_in, dim_mv)
-            x_n_agg = x_n_agg.unsqueeze(0).expand(self.c_in, -1)  # (c_in, dim_mv)
-
-            # Apply CGENN - it will handle the shape internally
-            k_n = self.cgenn_nets[shell_idx](
-                x_n_agg
-            )  # Should output (c_in, c_out, dim_mv)
-
-            # Check shape and permute if needed
+            # Ensure shape is (c_out, c_in, dim_mv)
             if len(k_n.shape) == 3:
-                k_n = k_n.permute(1, 0, 2)  # (c_out, c_in, dim_mv)
+                if k_n.shape[0] == self.c_in and k_n.shape[1] == self.c_out:
+                    k_n = k_n.permute(1, 0, 2)
             else:
-                # If shape is (c_out, dim_mv), expand for c_in
-                k_n = k_n.unsqueeze(1).expand(
-                    -1, self.c_in, -1
-                )  # (c_out, c_in, dim_mv)
+                k_n = k_n.unsqueeze(1).expand(-1, self.c_in, -1)  # (c_out, c_in, dim_mv)
 
-            # Broadcast to spatial dimensions
-            k_n = k_n.unsqueeze(-1)
-            k_n = k_n.expand(
-                -1, -1, -1, self.kernel_size
-            )
-
-            # Apply learnable mask
+            # Add spatial dimension: (c_out, c_in, dim_mv, kernel_size)
+            k_n = k_n.unsqueeze(-1).expand(-1, -1, -1, self.kernel_size)
             mask = self._compute_learnable_mask(spatial_grid, r, shell_idx)
             k_accum += self.mask_weights[shell_idx] * k_n * mask
 
-        # Reshape for kernel head
-        # k_accum shape: (c_out, c_in, dim_mv, k)
-        # We need to reduce dim_mv dimension for standard convolution
+        # Flatten for kernel head transformation
+        k_flat = k_accum.reshape(1, self.c_out * self.c_in * self.dim_mv, self.kernel_size)
+        k_transformed = self.kernel_head(k_flat)
+        k_out_struct = k_transformed.reshape(self.c_out, self.c_in, self.dim_mv, self.kernel_size)
 
-        # Option 1: Average over multivector components
-        k_reduced = k_accum.mean(dim=2)  # (c_out, c_in, k)
-
-        # Apply learnable kernel head transformation
-        # Input: (c_out, c_in, k)
-        k_reshaped = k_reduced.reshape(
-            1,
-            self.c_out * self.c_in,
-            self.kernel_size
+        # Build full block matrix of shape (c_out * dim_mv, c_in * dim_mv, kernel_size)[cite: 1]
+        k_final = torch.zeros(
+            self.c_out, self.dim_mv, self.c_in, self.dim_mv, self.kernel_size,
+            device=device, dtype=k_accum.dtype
         )
+        for m in range(self.dim_mv):
+            k_final[:, m, :, m, :] = k_out_struct[:, :, m, :]
 
-        # Use 3D conv to mix and transform kernel
-        k_transformed = self.kernel_head(k_reshaped)  # (1, c_out*c_in, k)
-
-        # Reshape to final kernel format
-        k_final = k_transformed.reshape(
-            self.c_out, self.c_in, self.kernel_size
+        k_final = k_final.reshape(
+            self.c_out * self.dim_mv, self.c_in * self.dim_mv, self.kernel_size
         )
 
         return k_final
@@ -327,7 +296,8 @@ class CliffordSteerableKernel(nn.Module):
 class CliffordSteerableConvolution(nn.Module):
     """
     Function 3: CLIFFORDSTEERABLECONVOLUTION (Fully Learnable)
-    Applies learnable steerable convolution to input feature map.
+    Applies learnable steerable convolution to input feature maps,
+    preserving multivector components.
     """
 
     def __init__(
@@ -360,6 +330,7 @@ class CliffordSteerableConvolution(nn.Module):
         self.q = q
         self.c_in = c_in
         self.c_out = c_out
+        self.dim_mv = 2 ** (p + q)
         self.stride = stride
         self.padding = padding
         self.kernel_size = kernel_size
@@ -368,29 +339,43 @@ class CliffordSteerableConvolution(nn.Module):
         self.kernel_gen = CliffordSteerableKernel(
             p, q, c_in, c_out, n_shells, kernel_size, n_sampling_points, hidden_dim
         )
-
-        # Learnable bias
-        self.bias = nn.Parameter(torch.zeros(c_out))
+        self.bias = nn.Parameter(torch.zeros(c_out * self.dim_mv))
 
     def forward(self, F_in: torch.Tensor) -> torch.Tensor:
         """
         Apply learnable steerable convolution.
 
         Args:
-            F_in: Input feature map (B, c_in, H)
-
+            F_in: Input feature map of shape (B, c_in, H) or (B, c_in * dim_mv, H)
         Returns:
-            F_out: Output feature map (B, c_out, H'
+            F_out: Output feature map of shape (B, c_out * dim_mv, H_out)
         """
-        # Generate learnable steerable kernel
-        k = self.kernel_gen()  # (c_out, c_in, k)
+        B, C_in, H = F_in.shape
 
-        # Apply 3D convolution
-        F_out = F.conv1d(
-            F_in, k, stride=self.stride, padding=self.padding, bias=self.bias
+        if C_in == self.c_in:
+            F_mv = torch.zeros(
+                B, self.c_in, self.dim_mv, H, device=F_in.device, dtype=F_in.dtype
+            )
+            F_mv[:, :, 0, :] = F_in
+            F_in_flat = F_mv.reshape(B, self.c_in * self.dim_mv, H)
+        elif C_in == self.c_in * self.dim_mv:
+            F_in_flat = F_in
+        else:
+            raise ValueError(
+                f"CliffordSteerableConvolution expected input channels to be either {self.c_in} "
+                f"or {self.c_in * self.dim_mv}, but got {C_in}."
+            )
+
+        k = self.kernel_gen()  # (c_out * dim_mv, c_in * dim_mv, kernel_size)[cite: 1]
+
+        F_out_flat = F.conv1d(
+            F_in_flat,
+            k,
+            stride=self.stride,
+            padding=self.padding,
+            bias=self.bias,
         )
-
-        return F_out
+        return F_out_flat
 
 
 class CliffordSteerableNetwork(pl.LightningModule):
@@ -409,6 +394,9 @@ class CliffordSteerableNetwork(pl.LightningModule):
         scheduler_patience: int = 5,
     ):
         super().__init__()
+        self.p = p
+        self.q = q
+        self.dim_mv = 2 ** (p + q)
         self.out_channels = out_channels
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
@@ -431,7 +419,8 @@ class CliffordSteerableNetwork(pl.LightningModule):
                     padding=kernel_size // 2,
                 )
             )
-            layers.append(nn.GroupNorm(min(8, hidden_c), hidden_c))
+            total_hidden_c = hidden_c * self.dim_mv
+            layers.append(nn.GroupNorm(min(8, total_hidden_c), total_hidden_c))
             layers.append(nn.GELU())
             prev_c = hidden_c
 
@@ -442,7 +431,7 @@ class CliffordSteerableNetwork(pl.LightningModule):
         # TODO: Check if this additional Linear layer is necessary
         self.classifier = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(prev_c, 512),
+            nn.Linear(prev_c * self.dim_mv, 512),
             nn.ReLU(),
             nn.Linear(512, out_channels),
         )
