@@ -1,0 +1,194 @@
+<!-- Progressive 3D blob plot (three.js) for blob_visualization.py; __PAYLOAD__ is substituted from Python.
+     Points go into preallocated GPU buffers, so each frame uploads only the new points. Plotly re-processed every
+     point on each update (8-12 s to fill three 20k-point plots vs ~0.5 s here). -->
+<style>
+  html, body { margin: 0; overflow: hidden; background: #fff; font: 12px sans-serif; }
+  #wrap { position: relative; }
+  canvas { position: absolute; left: 0; top: 0; }
+  #ui { position: absolute; top: 4px; right: 4px; display: flex; gap: 4px; }
+  #ui button { font: 11px sans-serif; padding: 2px 6px; cursor: pointer; background: #fff; border: 1px solid #ccc; border-radius: 3px; color: #444; }
+  #tip { position: absolute; pointer-events: none; display: none; white-space: nowrap; background: rgba(255,255,255,.92);
+         border: 1px solid #888; border-radius: 3px; padding: 3px 6px; }
+</style>
+<div id="wrap"><canvas id="gl"></canvas><canvas id="ov"></canvas>
+  <div id="ui"><button id="home" title="Reset camera">Reset view</button><button id="png" title="Download PNG of the current view">PNG</button></div>
+  <div id="tip"></div></div>
+<script type="importmap">{"imports": {"three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.min.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from "three";
+import {OrbitControls} from "three/addons/controls/OrbitControls.js";
+
+const P = __PAYLOAD__;
+const S = P.shape, N = P.n, H = P.height, CB = 80;  // CB: px on the right reserved for the colour bar
+const decode = (b64, T) => { const s = atob(b64), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return new T(u.buffer); };
+const C = N ? decode(P.coords, Uint16Array) : new Uint16Array(0), V = N ? decode(P.values, Float32Array) : new Float32Array(0);
+
+// ---- colours: Plotly's Viridis stops, interpolated (THREE.Color converts the sRGB hex to linear for shading)
+const stops = P.colorscale.map(h => new THREE.Color(h));
+function viridis(t, out = new THREE.Color()) {
+  t = Math.min(1, Math.max(0, t)) * (stops.length - 1);
+  const a = Math.floor(t), b = Math.min(a + 1, stops.length - 1);
+  return out.copy(stops[a]).lerp(stops[b], t - a);
+}
+
+// ---- scene, camera (z up, Plotly's default eye direction), controls; render only on demand
+const glc = document.getElementById("gl"), ov = document.getElementById("ov"), tip = document.getElementById("tip");
+const renderer = new THREE.WebGLRenderer({canvas: glc, antialias: true});
+renderer.setClearColor(0xffffff);
+const scene = new THREE.Scene(), center = new THREE.Vector3(...S.map(s => (s - 1) / 2)), diag = Math.hypot(...S);
+const camera = new THREE.PerspectiveCamera(30, 1, diag / 100, diag * 20);
+camera.up.set(0, 0, 1);
+scene.add(camera, new THREE.AmbientLight(0xffffff, 0.8));
+const light = new THREE.DirectionalLight(0xffffff, 2.2);  // headlight: lit side always faces the viewer
+light.position.set(0.4, 0.6, 0); camera.add(light, light.target); light.target.position.set(0, 0, -1);
+const controls = new OrbitControls(camera, ov);
+const home = () => { controls.target.copy(center); camera.position.copy(center).addScaledVector(new THREE.Vector3(1, 1, 1).normalize(), diag * 2.2); controls.update(); };
+let queued = false;
+const render = () => { if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; renderer.render(scene, camera); const c = ov.getContext("2d"); c.clearRect(0, 0, ov.width, ov.height); drawOverlay(c, devicePixelRatio); }); } };
+controls.addEventListener("change", render);
+// Plain wheel scrolls the Streamlit page; wheel while holding a mouse button zooms (OrbitControls ignores the wheel mid-drag)
+controls.enableZoom = false; controls.minDistance = diag * 0.05; controls.maxDistance = diag * 10;
+let held = false;  // tracked ourselves: WheelEvent.buttons isn't reliably set while a button is down
+ov.addEventListener("pointerdown", () => held = true);
+for (const ev of ["pointerup", "pointercancel", "blur"]) addEventListener(ev, () => held = false);
+ov.addEventListener("wheel", e => {
+  if (!held) return;
+  e.preventDefault();
+  camera.position.sub(controls.target).multiplyScalar(Math.exp(e.deltaY * 0.001)).add(controls.target);
+  controls.update();
+}, {passive: false});
+
+// ---- axes: box, grid lines on the three planes through the origin, tick labels drawn on the 2D overlay
+const niceTicks = max => { const raw = max / 5, p = 10 ** Math.floor(Math.log10(raw || 1)), m = raw / p;
+  const step = (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p; const t = []; for (let v = 0; v <= max + 1e-9; v += step) t.push(v); return t; };
+const M = S.map(s => s - 1), T = M.map(niceTicks), seg = [];
+const line = (a, b) => seg.push(...a, ...b);
+for (const x of T[0]) { line([x, 0, 0], [x, M[1], 0]); line([x, 0, 0], [x, 0, M[2]]); }
+for (const y of T[1]) { line([0, y, 0], [M[0], y, 0]); line([0, y, 0], [0, y, M[2]]); }
+for (const z of T[2]) { line([0, 0, z], [M[0], 0, z]); line([0, 0, z], [0, M[1], z]); }
+const gridGeo = new THREE.BufferGeometry(); gridGeo.setAttribute("position", new THREE.Float32BufferAttribute(seg, 3));
+scene.add(new THREE.LineSegments(gridGeo, new THREE.LineBasicMaterial({color: 0xe5e5e5})),
+          new THREE.Box3Helper(new THREE.Box3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(...M)), 0xaaaaaa));
+// shortcut: grid walls and tick labels sit on fixed faces (Plotly moves them to the back faces as you rotate); fine for inspection
+const labels = [...T[0].map(v => [[v, M[1], 0], v]), ...T[1].map(v => [[M[0], v, 0], v]), ...T[2].map(v => [[M[0], 0, v], v]),
+                [[M[0] / 2, M[1] * 1.12, 0], "X"], [[M[0] * 1.12, M[1] / 2, 0], "Y"], [[M[0] * 1.08, 0, M[2] / 2], "Z"]];
+const cbRange = P.mode === "volume" ? [0.15, 0.6] : [0, 1];
+const cbTitle = {points: "Probability", spheres: "Density (norm.)", volume: "Rel. density"}[P.mode];
+
+function drawOverlay(ctx, k) {
+  const W = ctx.canvas.width / k, v = new THREE.Vector3(), pw = W - CB;
+  ctx.setTransform(k, 0, 0, k, 0, 0);
+  ctx.fillStyle = "#444"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.font = "15px sans-serif"; ctx.fillText(P.title, W / 2, 16);
+  for (const [p, txt] of labels) {
+    v.set(...p).project(camera); if (v.z > 1) continue;
+    ctx.font = typeof txt === "string" ? "bold 12px sans-serif" : "11px sans-serif";
+    ctx.fillText(txt, (v.x + 1) / 2 * pw, (1 - v.y) / 2 * H);
+  }
+  if (!N) { ctx.fillStyle = "gray"; ctx.font = "14px sans-serif"; ctx.fillText("No data to display", pw / 2, H / 2); return; }
+  const x0 = W - CB + 12, y0 = 60, h = H - 110, g = ctx.createLinearGradient(0, y0 + h, 0, y0);
+  P.colorscale.forEach((c, i) => g.addColorStop(i / (P.colorscale.length - 1), c));
+  ctx.fillStyle = g; ctx.fillRect(x0, y0, 14, h); ctx.strokeStyle = "#999"; ctx.strokeRect(x0, y0, 14, h);
+  ctx.fillStyle = "#444"; ctx.textAlign = "left"; ctx.font = "11px sans-serif";
+  for (let i = 0; i <= 5; i++) ctx.fillText((cbRange[0] + (cbRange[1] - cbRange[0]) * i / 5).toFixed(2), x0 + 20, y0 + h - h * i / 5);
+  ctx.fillText(cbTitle, x0 - 8, y0 - 16);
+}
+
+function resize() {
+  const W = innerWidth;
+  renderer.setPixelRatio(devicePixelRatio); renderer.setSize(W - CB, H);
+  camera.aspect = (W - CB) / H; camera.updateProjectionMatrix();
+  Object.assign(ov, {width: W * devicePixelRatio, height: H * devicePixelRatio}); Object.assign(ov.style, {width: W + "px", height: H + "px"});
+  document.getElementById("wrap").style.height = H + "px"; render();
+}
+addEventListener("resize", resize);
+
+// ---- data objects: points (points/volume modes) or instanced spheres; filled progressively by pump()
+const col = new THREE.Color();
+let obj, fill;
+if (P.mode === "spheres") {
+  const sphere = new THREE.IcosahedronGeometry(P.radius, N > 5000 ? 0 : 1);  // 20 vs 80 triangles, same rule as render_blob
+  sphere.setAttribute("normal", sphere.getAttribute("position").clone()); sphere.normalizeNormals();  // smooth, not faceted
+  obj = new THREE.InstancedMesh(sphere, new THREE.MeshStandardMaterial({roughness: 0.5}), Math.max(N, 1));
+  obj.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(Math.max(N, 1) * 3), 3);
+  obj.count = 0; obj.frustumCulled = false;
+  const m = new THREE.Matrix4();
+  fill = (a, b) => {
+    for (let p = a; p < b; p++) { obj.setMatrixAt(p, m.makeTranslation(C[3 * p], C[3 * p + 1], C[3 * p + 2])); obj.setColorAt(p, viridis(V[p], col)); }
+    obj.instanceMatrix.addUpdateRange(16 * a, 16 * (b - a)); obj.instanceColor.addUpdateRange(3 * a, 3 * (b - a));
+    obj.instanceMatrix.needsUpdate = obj.instanceColor.needsUpdate = true; obj.count = b;
+  };
+} else {
+  const dot = document.createElement("canvas"); dot.width = dot.height = 64;  // round markers instead of GL squares
+  const d = dot.getContext("2d"); d.fillStyle = "#fff"; d.beginPath(); d.arc(32, 32, 30, 0, 2 * Math.PI); d.fill();
+  const geo = new THREE.BufferGeometry(), pos = new THREE.BufferAttribute(new Float32Array(N * 3), 3), rgb = new THREE.BufferAttribute(new Float32Array(N * 3), 3);
+  geo.setAttribute("position", pos); geo.setAttribute("color", rgb); geo.setDrawRange(0, 0);
+  geo.boundingSphere = new THREE.Sphere(center, diag);  // fixed, so the growing buffer never needs recomputing
+  obj = new THREE.Points(geo, new THREE.PointsMaterial({size: P.mode === "volume" ? 4 : 5, sizeAttenuation: false, vertexColors: true,
+    map: new THREE.CanvasTexture(dot), alphaTest: 0.5, transparent: P.mode === "volume", opacity: P.mode === "volume" ? 0.5 : 1}));
+  fill = (a, b) => {
+    for (let p = a; p < b; p++) { pos.setXYZ(p, C[3 * p], C[3 * p + 1], C[3 * p + 2]); viridis(V[p], col); rgb.setXYZ(p, col.r, col.g, col.b); }
+    pos.addUpdateRange(3 * a, 3 * (b - a)); rgb.addUpdateRange(3 * a, 3 * (b - a)); pos.needsUpdate = rgb.needsUpdate = true; geo.setDrawRange(0, b);
+  };
+}
+scene.add(obj);
+
+// ~128 points on the first frame, then 1.5x more per frame: the shape shows at once and densifies (~15 frames for 20k)
+let done = 0, step = 128;
+function pump() {
+  const end = Math.min(N, done + step);
+  fill(done, end); done = end; step = Math.ceil(step * 1.5);
+  renderer.render(scene, camera);
+  if (done < N) requestAnimationFrame(pump); else if (P.mode === "volume") isosurfaces();
+}
+
+// ---- volume mode: nested isosurfaces of the smoothed grid (marching cubes), replacing the preview points
+async function isosurfaces() {
+  const {MarchingCubes} = await import("three/addons/objects/MarchingCubes.js");
+  const g = decode(P.grid, Uint8Array), [sx, sy, sz] = P.grid_shape, R = Math.max(sx, sy, sz) + 3;  // +3: MC skips its border cells
+  const mc = new MarchingCubes(R, new THREE.MeshBasicMaterial(), false, false, 500000);
+  for (let x = 0; x < sx; x++) for (let y = 0; y < sy; y++) for (let z = 0; z < sz; z++)
+    mc.field[(x + 1) + (y + 1) * R + (z + 1) * R * R] = g[(x * sy + y) * sz + z] / 255;  // grid is C-ordered (x slowest)
+  const [lo, hi] = cbRange, levels = [lo, (lo + hi) / 2, hi];
+  levels.forEach((lev, i) => {
+    mc.isolation = lev; mc.update();
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(mc.positionArray.slice(0, mc.count * 3), 3));
+    geo.setAttribute("normal", new THREE.BufferAttribute(mc.normalArray.slice(0, mc.count * 3), 3));
+    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({color: viridis(i / (levels.length - 1)), transparent: true,
+      opacity: 0.25, depthWrite: false, side: THREE.DoubleSide, roughness: 0.6}));
+    // MC local coords span [-1, 1] over R cells; map cell i back to voxel origin + i - 1
+    mesh.scale.setScalar(R / 2); mesh.position.set(...P.origin.map(o => o + R / 2 - 1));
+    scene.add(mesh);
+  });
+  scene.remove(obj); render();
+}
+
+// ---- hover (points mode, like the Plotly hovertemplate) and toolbar
+if (P.mode === "points") {
+  const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(); ray.params.Points.threshold = 0.7;
+  ov.addEventListener("pointermove", e => {
+    if (e.buttons) { tip.style.display = "none"; return; }
+    ndc.set(e.offsetX / (innerWidth - CB) * 2 - 1, -e.offsetY / H * 2 + 1); ray.setFromCamera(ndc, camera);
+    const hit = ray.intersectObject(obj)[0];
+    if (!hit) { tip.style.display = "none"; return; }
+    const p = hit.index;
+    tip.innerHTML = `<b>Position</b><br>X: ${C[3 * p]}<br>Y: ${C[3 * p + 1]}<br>Z: ${C[3 * p + 2]}<br>Prob: ${V[p].toFixed(3)}`;
+    Object.assign(tip.style, {display: "block", left: e.offsetX + 12 + "px", top: e.offsetY + 12 + "px"});
+  });
+  ov.addEventListener("pointerleave", () => tip.style.display = "none");
+}
+document.getElementById("home").onclick = home;
+document.getElementById("png").onclick = () => {  // 3x PNG of the current camera, like Plotly's toImageButtonOptions scale 3
+  const k = 3, W = innerWidth, out = document.createElement("canvas"), x = out.getContext("2d");
+  renderer.setPixelRatio(k); renderer.setSize(W - CB, H, false); renderer.render(scene, camera);
+  out.width = W * k; out.height = H * k; x.fillStyle = "#fff"; x.fillRect(0, 0, out.width, out.height);
+  x.drawImage(glc, 0, 0); drawOverlay(x, k);
+  renderer.setPixelRatio(devicePixelRatio); renderer.setSize(W - CB, H, false); render();
+  out.toBlob(b => { const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = P.filename + ".png"; a.click(); });
+};
+
+home(); resize(); renderer.render(scene, camera);
+if (N) requestAnimationFrame(pump);
+</script>
