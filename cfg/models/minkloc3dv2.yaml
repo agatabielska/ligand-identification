@@ -13,4 +13,4 @@ quantization_step: 0.01
 normalize_embeddings: False
 
 input_dim: 1
-output_dim: 97
+output_dim: 91

@@ -1,6 +1,7 @@
 # data, logs and files
 *.yaml
 *.yml
+!cfg/tune_sparse.yaml
 /data
 /logs
 */output

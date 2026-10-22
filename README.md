@@ -300,3 +300,56 @@ the final model are available [here](https://ligands.blob.core.windows.net/ligan
 	journal = {bioRxiv}
 }
 ```
+# Sparse-model hyperparameter tuning
+
+The reproducible sparse-model workflow is implemented in
+[`scripts/tune_and_train_sparse.py`](scripts/tune_and_train_sparse.py). It runs
+independent W&B runs for every sampled configuration and dataset, selecting by
+validation accuracy. The selected parameters are written to
+`logs/hpo/best_hyperparameters.json`. The final stage then trains on the union
+of `train` and `val` and evaluates once on `test` (or `holdout` when that is
+the available split).
+
+Each run records training batch loss (`train/batch_loss`) plus complete training and
+validation/test epoch metrics: loss, accuracy, top-5/top-10/top-20 accuracy,
+macro and micro recall, micro precision, and micro F1. It also records the
+learning rate, model/optimizer/dataset metadata, and a W&B model artifact.
+HPO training and validation metrics are logged once per epoch for every trial,
+while final test metrics are logged after refitting.
+
+Training loaders drop an incomplete final batch so NetVLAD BatchNorm never
+receives a singleton batch. Validation and test loaders retain all examples.
+
+The HPO search uses Optuna's TPE sampler and median pruner. Studies are stored
+in `logs/hpo/optuna.db`, so rerunning the same dataset/config resumes the
+existing study. `trials` is the target number of completed or pruned trials,
+not the number added on every invocation. Completed and pruned trials are not
+repeated; runtime failures are recorded as failed trials and the remaining
+trials continue. The summary JSON is updated atomically after each dataset, so
+an interrupted run preserves earlier datasets. It also covers MinkLoc3Dv2
+architecture parameters: backbone
+channel widths (`planes`), residual block counts (`layers`), FPN top-down
+levels, initial convolution kernel size, feature size, residual block type,
+and pooling type.
+
+Terminal output is shown live and appended to `logs/hpo/tuning.log`. The
+workflow displays progress bars for the complete dataset run, trials, epochs,
+and batches, including validation metrics and trial completion/pruning/failure
+counts. Full tracebacks for failed trials are appended to
+`logs/hpo/errors.log`.
+
+W&B authentication is read from the normal W&B environment/login configuration;
+no credentials are stored in the repository. Adjust search ranges, run counts,
+or the W&B project in [`cfg/tune_sparse.yaml`](cfg/tune_sparse.yaml), then run
+from the repository root:
+
+```bash
+python scripts/tune_and_train_sparse.py --stage all
+```
+
+To rerun only one stage:
+
+```bash
+python scripts/tune_and_train_sparse.py --stage tune
+python scripts/tune_and_train_sparse.py --stage final
+```

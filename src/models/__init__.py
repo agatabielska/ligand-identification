@@ -7,5 +7,5 @@ MODELS = {
 }
 
 
-def create(model_type: str) -> nn.Module:
-    return MODELS[model_type.lower()]()
+def create(model_type: str, overrides=None) -> nn.Module:
+    return MODELS[model_type.lower()](overrides=overrides)

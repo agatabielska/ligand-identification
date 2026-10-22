@@ -94,14 +94,16 @@ if __name__ == "__main__":
     model = models.create(cfg["model"])
     print(model)
     model.to(device)
-    save_path = "checkpoints/best_model_{dataset}.pth".format(dataset=cfg["dataset_dir"].split("/")[-1])
+    save_path = "checkpoints/original_sched_best_model_{dataset}.pth".format(dataset=cfg["dataset_dir"].split("/")[-1])
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(cfg["lr"]), weight_decay=float(cfg["weight_decay"]))
     
     # important: scheduler changed
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=2, factor=0.3)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=12, gamma=0.1)
+    # scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=2, factor=0.3)
     criterion = torch.nn.CrossEntropyLoss(ignore_index=-1)
-    early_stopper = EarlyStopping(patience=5, min_delta=0.01, save_path=save_path)
+    # mindelta changed, not checked yet
+    early_stopper = EarlyStopping(patience=5, min_delta=0.1, save_path=save_path)
 
     log.log_config(run=run, model=model, criterion=criterion, optimizer=optimizer, dataset=train)
 
@@ -167,7 +169,7 @@ if __name__ == "__main__":
 
         # Now these variables are correctly populated
         avg_val_loss = val_loss_accum / max(val_batches, 1)
-        scheduler.step(avg_val_loss)
+        scheduler.step()
         early_stopper(avg_val_loss, model)
         if early_stopper.early_stop:
             print("Early stopping triggered. Ending training.")

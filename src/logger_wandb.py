@@ -110,6 +110,13 @@ def log_config(
     if hasattr(dataset, 'labels'):
         instances = dataset.labels.shape[0]
         num_labels = dataset.labels.shape[1]
+    elif hasattr(dataset, "datasets"):
+        instances = sum(len(child) for child in dataset.datasets)
+        num_labels = len({
+            label
+            for child in dataset.datasets
+            for _, label in child.samples
+        })
     else:
         instances = len(dataset)
         num_labels = len(set(label for _, label in dataset.samples))

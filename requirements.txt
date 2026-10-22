@@ -12,4 +12,8 @@ pytest~=7.1.0
 scikit-optimize
 open3d
 torch==1.10.0+cu113
+torchmetrics
+optuna==2.10.1
+tqdm
+wandb
 wget
