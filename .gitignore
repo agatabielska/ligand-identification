@@ -41,8 +41,9 @@ docker/.env
 
 scripts/checkpoints
 scripts/logs
-scripts/wandb
+scripts/wandb/
 
 data/
 
 */.o
+logs/

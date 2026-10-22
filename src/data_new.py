@@ -26,7 +26,6 @@ class BlobDataset(Dataset):
             self.label_to_idx = label_to_idx
             class_dirs = sorted([d for d in self.path.iterdir() if d.is_dir() and d.name in label_to_idx])
         else:
-            #TODO this is buggy part
             class_dirs = sorted([d for d in self.path.iterdir() if d.is_dir()])
             self.label_to_idx = {d.name: idx for idx, d in enumerate(class_dirs)}
             
@@ -55,9 +54,6 @@ class BlobDataset(Dataset):
 
         # Convert to dict so that we can modify it in place
         npz = dict(npz)
-
-        if self.normalize:
-            npz["indices"] = self.pc_normalize(npz["indices"])
 
         idx = npz["indices"]
         vals = npz["values"]

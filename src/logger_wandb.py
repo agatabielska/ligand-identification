@@ -8,7 +8,7 @@ import torchmetrics
 import yaml
 
 PROJECT = "ligand-identification"
-ENTITY = "adam-mazur"
+ENTITY = "agata-bielska"
 
 
 def get_run(tags: Union[List[str], None] = None):
