@@ -1,0 +1,39 @@
+# data, logs and files
+*.yaml
+*.yml
+/data
+/logs
+*/output
+*.csv
+*.npz
+*.pt
+*.pkl
+
+# pycache
+__pycache__/
+*/__pycache__/*
+
+# jupyter checkpoints
+*/.ipynb_checkpoints
+
+# venv
+/venv
+/MEtestvenv
+
+# notebook output files
+*/.ipynb_checkpoints/*
+blob_details/output/volume_graph.html
+
+# neptune
+.neptune
+
+# pycharm
+.idea
+
+# secret configs
+cfg/neptune.yaml
+
+# docker configs
+docker/.env
+!docker/compose-cpu.yml
+!docker/compose-gpu.yml
