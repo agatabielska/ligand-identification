@@ -53,7 +53,9 @@ class BlobDataset(Dataset):
         centroid = np.mean(pc, axis=0)
         pc = pc - centroid
         m = np.max(np.linalg.norm(pc, axis=1))
-        return pc / m
+        if not np.isfinite(m):
+            raise ValueError("Cannot normalize blob coordinates: non-finite radius")
+        return pc / m if m > 1e-12 else np.zeros_like(pc)
 
     def _load_data(self, idx):
         file_path, label = self.samples[idx]
