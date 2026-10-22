@@ -1,8 +1,0 @@
-batch_size: 4096
-dataset_dir: ../data/cryoem_blobs_uniform_2000_max
-dataset_file: ../data/fold2.csv
-device: cuda
-model_epoch: 50
-model_name: MinkLoc3D
-model_run_id: LIGANDS-945
-no_workers: 8

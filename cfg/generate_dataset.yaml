@@ -1,9 +1,0 @@
-input_dir: ../data/cryoem_blobs
-output_dir: ../data/cryoem_blobs_uniform_2000_max
-start: 0
-end: -1
-steps:
-  - name: UniformSelectionTransform
-    config:
-      max_blob_size: 2000
-      method: max

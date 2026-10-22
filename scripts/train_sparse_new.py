@@ -11,7 +11,7 @@ import logger_wandb as log
 import models
 import os
 from cfg import read_config
-from data_new import BlobDataset, dataset_split, collation_fn_sparse, BlobDataset
+from data_new import BlobDataset, collation_fn_sparse, BlobDataset
 
 from tqdm import tqdm
 
