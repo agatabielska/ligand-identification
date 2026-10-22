@@ -21,18 +21,6 @@ def get_run(tags: Union[List[str], None] = None):
     return run
 
 
-def fetch_state_dict(
-        model_name: str,
-        run_id: str,
-        epoch: int,
-) -> OrderedDict[str, torch.Tensor]:
-    artifact_name = f"{ENTITY}/{PROJECT}/{model_name}-run{run_id}-epoch{epoch}:latest"
-    api = wandb.Api()
-    artifact = api.artifact(artifact_name)
-    artifact_dir = artifact.download()
-    state_dict = torch.load(os.path.join(artifact_dir, "model.pt"))
-    return state_dict
-
 
 def compute_metrics(preds: torch.Tensor, target: torch.Tensor) -> dict:
     """Compute all metrics and return as a flat dict with 'eval/' prefix."""
