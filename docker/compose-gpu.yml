@@ -1,3 +1,4 @@
+# Adapted from https://github.com/jkarolczak/ligand-classification
 
 services:
   minkowski_gpu:

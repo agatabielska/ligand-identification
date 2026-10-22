@@ -1,3 +1,4 @@
+# Adapted from https://github.com/jkarolczak/ligand-classification
 accum_iter: 1
 batch_size: 128
 # dataset_dir: ../data/thresholded_transform_probabilistic

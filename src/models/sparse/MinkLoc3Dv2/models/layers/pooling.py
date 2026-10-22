@@ -1,3 +1,4 @@
+# Adapted from https://github.com/jkarolczak/ligand-classification
 # Pooling methods code based on: https://github.com/filipradenovic/cnnimageretrieval-pytorch
 
 import torch

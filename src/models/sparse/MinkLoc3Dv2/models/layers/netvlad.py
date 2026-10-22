@@ -1,3 +1,4 @@
+# Adapted from https://github.com/jkarolczak/ligand-classification
 """
 PointNet code taken from PointNetVLAD Pytorch implementation.
 """

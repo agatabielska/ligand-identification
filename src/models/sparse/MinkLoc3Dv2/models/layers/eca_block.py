@@ -1,3 +1,4 @@
+# Adapted from https://github.com/jkarolczak/ligand-classification
 # Implementation of Efficient Channel Attention ECA block
 
 import numpy as np

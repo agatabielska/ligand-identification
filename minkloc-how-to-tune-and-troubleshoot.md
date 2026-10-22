@@ -162,13 +162,6 @@ nvidia-smi
 ```
 
 If it fails, repair/restart the host GPU installation before starting Docker.
-The CPU fallback is:
-
-```bash
-./start.sh cpu
-```
-
-but it is not suitable for practical MinkowskiEngine training.
 
 ### W&B `401 Unauthorized` or invalid API key
 

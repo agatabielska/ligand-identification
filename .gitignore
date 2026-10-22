@@ -47,3 +47,8 @@ data/
 
 */.o
 logs/
+
+scripts/checkpoints
+wandb/
+outputs/
+checkpoints/

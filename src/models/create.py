@@ -1,3 +1,4 @@
+# Adapted from https://github.com/jkarolczak/ligand-classification
 
 from models.sparse import MinkLoc3Dv2
 from models.sparse.MinkLoc3Dv2.misc.utils import ModelParams

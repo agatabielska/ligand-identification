@@ -1,3 +1,4 @@
+# Adapted from https://github.com/jkarolczak/ligand-classification
 # Warsaw University of Technology
 
 import torch.nn as nn

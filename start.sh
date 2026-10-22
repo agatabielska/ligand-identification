@@ -1,3 +1,4 @@
+# Adapted from https://github.com/jkarolczak/ligand-classification
 if [[ $1 == "cpu" ]]; then
     docker compose --env-file docker/.env -f docker/compose-cpu.yml up -d
 elif [[ $1 == "deploy" ]]; then

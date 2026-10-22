@@ -1,3 +1,4 @@
+# Adapted from https://github.com/jkarolczak/ligand-classification
 import torch.nn as nn
 
 from models.create import minkloc3dv2

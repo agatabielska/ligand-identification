@@ -1,3 +1,5 @@
+<!-- Adapted from https://github.com/jkarolczak/ligand-classification -->
+
 [![Streamlit - Demo](https://img.shields.io/badge/Streamlit-Demo-green)](https://ligands.cs.put.poznan.pl)
 [![bioRxiv - Preprint](https://img.shields.io/badge/bioRxiv-Preprint-red)](https://www.biorxiv.org/content/10.1101/2024.08.27.610022v1)
 [![Zenodo - Data](https://img.shields.io/badge/Zenodo-Data-informational)](https://zenodo.org/records/10908325)

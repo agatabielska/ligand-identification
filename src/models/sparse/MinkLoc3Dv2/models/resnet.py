@@ -1,3 +1,4 @@
+# Adapted from https://github.com/jkarolczak/ligand-classification
 # Copyright (c) Chris Choy (chrischoy@ai.stanford.edu).
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of

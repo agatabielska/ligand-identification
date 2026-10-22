@@ -1,3 +1,4 @@
+# Adapted from https://github.com/jkarolczak/ligand-classification
 # based on src/models/MinkLoc3Dv2/models/minkloc3dv2.txt
 
 planes: [128, 256, 128, 64]
