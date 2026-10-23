@@ -1,14 +1,15 @@
 defaults:
-  - model: clifford
+  - model: spectral
   - machine: hpc
   - _self_
 
 train:
-  epochs: 100
-  learning_rate: 1e-3
+  epochs: 15
+  learning_rate: 3e-3
   out_channels: 97
   normalize_data: true
-  weight_decay: 1e-4
+  precision: bf16-mixed
+  weight_decay: 5e-2
   gradient_clip_val: null
   early_stopping:
     patience: 15
@@ -16,10 +17,13 @@ train:
     monitor: val_loss
 
 paths:
-  data_dir: data/processed
+  data_dir: data/unthresholded_transform_probabilistic
   model_checkpoint: checkpoints/
 
 wandb:
   run_name: null
 
 random_seed: 42
+
+global_statistics:
+  source: points_2000
