@@ -55,6 +55,9 @@ class BlobDataset(Dataset):
         m = np.max(np.linalg.norm(pc, axis=1))
         if not np.isfinite(m):
             raise ValueError("Cannot normalize blob coordinates: non-finite radius")
+        # A zero-radius blob has no meaningful direction or scale. Returning
+        # zero coordinates preserves its finite shape and lets the model see
+        # its density values without dividing by zero.
         return pc / m if m > 1e-12 else np.zeros_like(pc)
 
     def _load_data(self, idx):

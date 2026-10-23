@@ -1,16 +1,16 @@
-type: raw-npz-scalars
+type: spectral
 
 n_shells: 4
 lmax: 6
 r_max: 1.0
 n_channels: 2
-n_mix: 32
+n_mix: 16
 pow_mode: triu
 gram: none
 triples: nonzero
 bispec_lmax: 6
 bispec_mode: batched
-norm: batch
+norm: layer
 in_bn: false
 use_globals: all
 glob_dim: 64
@@ -24,3 +24,4 @@ clean_probability: 0.125
 label_smoothing: 0.05
 learning_rate: 3e-3
 weight_decay: 5e-2
+warmup_frac: 0.03

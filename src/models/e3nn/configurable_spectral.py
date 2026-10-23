@@ -12,7 +12,9 @@ from src.models.e3nn.spectral_net import SpectralNet
 from src.utils.metrics import compute_metrics
 
 
-GLOBAL_COLUMNS = {
+# Indices of the 12 optional scalar features used by the global branch.
+# The groups let the configuration select all, geometry-only, count-only, or no scalars.
+GLOBAL_FEATURE_INDICES = {
     "none": (),
     "all": tuple(range(12)),
     "geom": tuple(range(3, 12)),
@@ -56,8 +58,10 @@ class ConfigurableSpectralModel(pl.LightningModule):
         **_,
     ):
         super().__init__()
-        if use_globals not in GLOBAL_COLUMNS:
-            raise ValueError(f"use_globals must be one of {tuple(GLOBAL_COLUMNS)}, got {use_globals!r}")
+        if use_globals not in GLOBAL_FEATURE_INDICES:
+            raise ValueError(
+                f"use_globals must be one of {tuple(GLOBAL_FEATURE_INDICES)}, got {use_globals!r}"
+            )
         if not widths:
             raise ValueError("widths must contain at least one hidden-layer width")
 
@@ -73,7 +77,7 @@ class ConfigurableSpectralModel(pl.LightningModule):
         self.warmup_frac = warmup_frac
         self.chunk_size = chunk_size
         self.use_globals = use_globals
-        self.global_columns = GLOBAL_COLUMNS[use_globals]
+        self.global_columns = GLOBAL_FEATURE_INDICES[use_globals]
         self.glob_dim = glob_dim
         self.register_buffer("log_prior", torch.zeros(num_classes))
         self.register_buffer("global_mean", torch.zeros(12))
@@ -98,6 +102,7 @@ class ConfigurableSpectralModel(pl.LightningModule):
             feat_dropout=feat_dropout,
             bispec_mode=bispec_mode,
         )
+        self.net.head = nn.Identity()
 
         d_in = self.net.d_in
         if self.global_columns:
@@ -136,7 +141,9 @@ class ConfigurableSpectralModel(pl.LightningModule):
 
     @torch.no_grad()
     def set_global_stats(self, x: torch.Tensor):
-        """Standardize global features using the 2000-point training split."""
+        """Fit global-feature standardization once from the complete train split."""
+        if self.global_branch is None:
+            return
         features = torch.cat(
             [self.global_features(batch) for batch in x.split(1024)],
             dim=0,
@@ -148,9 +155,10 @@ class ConfigurableSpectralModel(pl.LightningModule):
 
     @torch.no_grad()
     def global_features(self, x: torch.Tensor) -> torch.Tensor:
+        """Return 12 per-sample invariants; this is vectorized, not batch-normalized."""
         pts, rho = x[..., :3], x[..., 3]
+        rho = rho.clamp_min(0)
         valid = (rho > 0).to(x.dtype)
-        rho = rho * valid
         n, total = valid.sum(1), rho.sum(1)
         weights = rho / total.clamp_min(1e-8)[:, None]
         center = (pts * weights[..., None]).sum(1, keepdim=True)
@@ -162,27 +170,16 @@ class ConfigurableSpectralModel(pl.LightningModule):
         covariance = torch.einsum("bn,bni,bnj->bij", weights, d, d)
         covariance = covariance + 1e-8 * torch.eye(3, device=x.device, dtype=x.dtype)
         eig = torch.linalg.eigvalsh(covariance).clamp_min(0).sqrt()
+
+        # Padding has zero density. Exclude it from the bounds so padded rows
+        # cannot enlarge the measured shape.
         valid_points = valid.bool().unsqueeze(-1)
         mins = pts.masked_fill(~valid_points, 0).amin(dim=1)
         maxs = pts.masked_fill(~valid_points, 0).amax(dim=1)
         bbox = (maxs - mins).sort(dim=1).values
-        return torch.stack(
-            [
-                torch.log1p(n),
-                torch.log1p(total),
-                torch.log1p(rho.max(1).values),
-                radius_valid.max(1).values,
-                radius_g,
-                radius_mean,
-                eig[:, 0],
-                eig[:, 1],
-                eig[:, 2],
-                bbox[:, 0],
-                bbox[:, 1],
-                bbox[:, 2],
-            ],
-            dim=-1,
-        )
+        counts = torch.stack((torch.log1p(n), torch.log1p(total), torch.log1p(rho.max(1).values)), dim=1)
+        radii = torch.stack((radius_valid.max(1).values, radius_g, radius_mean), dim=1)
+        return torch.cat((counts, radii, eig, bbox), dim=1)
 
     def forward(
         self,
@@ -211,6 +208,7 @@ class ConfigurableSpectralModel(pl.LightningModule):
         return self.head(features)
 
     def _augment(self, x: torch.Tensor) -> torch.Tensor:
+        """Mask densities for point dropout while retaining the fixed tensor shape."""
         if self.point_dropout <= 0 and self.density_noise <= 0:
             return x
         original = x
@@ -224,12 +222,15 @@ class ConfigurableSpectralModel(pl.LightningModule):
         return torch.where(clean[:, None, None], original, x)
 
     def training_step(self, batch, batch_idx):
-        x, y = batch
+        x, y, *global_batch = batch
         y = y.view(-1)
         augmented = self._augment(x)
         global_values = None
         if self.global_branch is not None:
-            global_values = self.global_features(x)
+            # Size features describe the clean sample, not the stochastic
+            # training mask. Their mean and standard deviation are fitted once
+            # from the complete training split by set_global_stats().
+            global_values = global_batch[0] if global_batch else self.global_features(x)
             global_values = (global_values - self.global_mean) / self.global_std
             global_values = global_values[:, self.global_columns]
             if self.glob_noise > 0:
@@ -242,9 +243,13 @@ class ConfigurableSpectralModel(pl.LightningModule):
         return loss
 
     def _eval_step(self, batch, prefix: str, recall):
-        x, y = batch
+        x, y, *global_batch = batch
         y = y.view(-1)
-        logits = self(x).float()
+        global_values = global_batch[0] if global_batch else None
+        if global_values is not None and self.global_branch is not None:
+            global_values = (global_values - self.global_mean) / self.global_std
+            global_values = global_values[:, self.global_columns]
+        logits = self(x, global_values=global_values).float()
         metrics = compute_metrics(logits, y, self.num_classes)
         recall.update(logits.argmax(1), y)
         for name, value in metrics.items():

@@ -22,3 +22,4 @@ ensemble*.out
 log_*.txt
 run_*.out
 logs/
+results/

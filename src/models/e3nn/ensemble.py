@@ -6,8 +6,8 @@ Tau selection options:
                    of the tau=0 validation accuracy
 
   uv run -m src.models.e3nn.ensemble paths.data_dir=data/unthresholded_transform_probabilistic \
-    model=points-2000-r3 machine.batch_size=256 machine.num_workers=8 \
-      +arch=points-2000-r3 +select=acc \
+    model=spectral machine.batch_size=256 machine.num_workers=8 \
+      +arch=spectral +select=acc \
     '+runs=[checkpoint_dir_1,checkpoint_dir_2]'
 """
 import re
@@ -19,7 +19,7 @@ import torch.nn.functional as F
 import torchmetrics
 from omegaconf import DictConfig, OmegaConf
 
-from src.scripts.train import GPULoader, get_dataset, make_top_density_transform
+from src.pipeline.data_loader import GPULoader, get_dataset, transform_e3nn
 
 TAUS = (0.0, 0.25, 0.5, 0.75)
 MAX_ACC_DROP = 0.02
@@ -37,12 +37,11 @@ def best_ckpt(run_dir: Path) -> Path:
 
 
 def get_cls(arch: str):
-    if arch in {"points-2000-r3", "raw-npz-scalars"}:
+    if arch == "spectral":
         from src.models.e3nn.configurable_spectral import ConfigurableSpectralModel
         return ConfigurableSpectralModel
     raise ValueError(
-        f"Unsupported ensemble architecture {arch!r}; use one of "
-        "points-2000-r3, raw-npz-scalars"
+        f"Unsupported ensemble architecture {arch!r}; use spectral"
     )
 
 
@@ -127,7 +126,7 @@ def main(cfg: DictConfig):
     data_dir = Path(cfg.paths.data_dir)
     classes = sorted({d.name for s in ("train", "val", "test") for d in (data_dir / s).iterdir() if d.is_dir()})
     label_to_idx = {n: i for i, n in enumerate(classes)}
-    transform = make_top_density_transform(cfg.model.get("max_points", 2000))
+    transform = transform_e3nn
     bs, nw = cfg.machine.batch_size, cfg.machine.num_workers
     val_loader = GPULoader(get_dataset(data_dir / "val", cfg, transform, label_to_idx), bs, False, device, nw)
     test_loader = GPULoader(get_dataset(data_dir / "test", cfg, transform, label_to_idx), bs, False, device, nw)

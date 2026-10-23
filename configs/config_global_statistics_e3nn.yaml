@@ -1,14 +1,13 @@
 defaults:
-  - model: raw-npz-scalars
+  - model: spectral_global_statistics
   - machine: hpc
   - _self_
 
 train:
   epochs: 15
-  learning_rate: 3e-3
   out_channels: 97
   normalize_data: true
-  weight_decay: 5e-2
+  precision: bf16-mixed
   gradient_clip_val: null
   early_stopping:
     patience: 15
@@ -23,3 +22,6 @@ wandb:
   run_name: null
 
 random_seed: 200
+
+global_statistics:
+  source: complete_input

@@ -31,21 +31,24 @@ from e3nn.nn import BatchNorm
 from e3nn.o3 import Irreps, Linear, wigner_3j
 
 
-def natural_irreps(mul: int, l_from: int, l_to: int) -> Irreps:
-    return Irreps([(mul, (l, (-1) ** l)) for l in range(l_from, l_to + 1)])
+def build_degree_irreps(multiplicity: int, first_degree: int, last_degree: int) -> Irreps:
+    """Build one irrep block for each angular degree in an inclusive range."""
+    l_from, l_to = first_degree, last_degree
+    return Irreps([(multiplicity, (l, (-1) ** l)) for l in range(l_from, l_to + 1)])
 
 
 def slog(f: torch.Tensor) -> torch.Tensor:
     return torch.sign(f) * torch.log1p(f.abs())
 
 
-def keep_triple(a: int, b: int, c: int, mode: str) -> bool:
-    odd = (a + b + c) % 2 == 1
+def is_valid_bispectrum_triple(first: int, second: int, third: int, mode: str) -> bool:
+    """Return whether a degree triple contributes a non-redundant contraction."""
+    odd = (first + second + third) % 2 == 1
     if mode == "all":
         return True
     if mode == "even":
         return not odd
-    return not (odd and (a == b or b == c))  # "nonzero"
+    return not (odd and (first == second or second == third))  # "nonzero"
 
 
 class SpectralNet(nn.Module):
@@ -81,10 +84,10 @@ class SpectralNet(nn.Module):
         self.gram, self.bispec_mode, self.pow_mode = gram, bispec_mode, pow_mode
         self.m = n_mix if n_mix > 0 else K * C  # channels per degree after the (optional) mix
 
-        irreps_in = natural_irreps(K * C, 0, lmax)
+        irreps_in = build_degree_irreps(K * C, 0, lmax)
         self.in_bn = BatchNorm(irreps_in) if in_bn else nn.Identity()
         if n_mix > 0:
-            irreps_mix = natural_irreps(n_mix, 0, lmax)
+            irreps_mix = build_degree_irreps(n_mix, 0, lmax)
             self.mix = Linear(irreps_in, irreps_mix)
             self.mix_bn = BatchNorm(irreps_mix) if mix_bn else nn.Identity()
         else:
@@ -96,7 +99,8 @@ class SpectralNet(nn.Module):
             for a in range(self.bl + 1)
             for b in range(a, self.bl + 1)
             for c in range(b, min(a + b, self.bl) + 1)
-            if not (drop_l0_triples and a == 0) and keep_triple(a, b, c, triples)
+            if not (drop_l0_triples and a == 0)
+            and is_valid_bispectrum_triple(a, b, c, triples)
         ]
         D = 2 * self.bl + 1
         w = torch.zeros(len(self.triples), D, D, D)

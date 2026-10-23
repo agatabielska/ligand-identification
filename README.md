@@ -48,19 +48,17 @@ The default command trains the strict 2,000-point spectral model:
 uv run -m src.scripts.train
 ```
 
-Override configuration values with Hydra:
+Change model and training values in the YAML files under `configs/` before
+starting a run. The command remains:
 
 ```bash
-uv run -m src.scripts.train \
-  model.n_mix=64 \
-  model.pow_mode=diag \
-  train.epochs=30
+uv run -m src.scripts.train
 ```
 
-Train the raw-NPZ scalar variant:
+Train the complete-input scalar variant:
 
 ```bash
-uv run -m src.scripts.train_raw_npz_scalars
+uv run -m src.scripts.train --config-name config_global_statistics_e3nn
 ```
 
 Train the Clifford model:
@@ -95,6 +93,21 @@ uv run -m src.experiments.spectral_experiments --force
 Results are written to `results/best_e2e/`. The runner prints individual
 metrics and validation-selected `POOL all` and `POOL top3` ensemble metrics.
 
+For larger GPU-oriented models while keeping exactly 2,000 points:
+
+```bash
+uv run -m src.experiments.gpu_scaling_experiments \
+  --preset baseline,head-wide,head-deep,mix48,mix64 \
+  --batch-size 256 \
+  --epochs 20 \
+  --force
+```
+
+The sweep starts from the measured `r3_bn_m32t` configuration and expands one
+capacity axis at a time. Available presets include wider/deeper heads,
+additional channel mixing, more radial shells, and a third input channel.
+Results are written to `results/gpu_scaling_2000/`.
+
 ## Evaluate a checkpoint ensemble
 
 The checkpoint ensemble evaluator expects run directories below `checkpoints/`,
@@ -102,19 +115,29 @@ each containing `model-*.ckpt` files:
 
 ```bash
 uv run -m src.models.e3nn.ensemble \
-  model=points-2000-r3 \
-  +arch=points-2000-r3 \
+  model=spectral \
+  +arch=spectral \
   +select=acc \
   '+runs=[run_directory_1,run_directory_2]'
 ```
 
 Use only checkpoints produced by the same configurable spectral model family.
 
-To reproduce the saved strict-protocol ensemble without retraining:
+To reuse saved strict-protocol experiment outputs without retraining:
 
 ```bash
-uv run python -c \
-'from src.experiments.spectral_experiments import report, CONFIGS, OUT_DIR; report(list(CONFIGS), OUT_DIR, "acc")'
+uv run -m src.experiments.spectral_experiments --report-only
+```
+
+The complete-input scalar protocol can also be ensembled. Run it with
+different seeds by changing `random_seed` in
+`configs/config_global_statistics_e3nn.yaml`; each run is saved under
+`results/raw_npz_scalars/`. Then report the saved ensemble with:
+
+```bash
+uv run -m src.experiments.spectral_experiments \
+  --report-only \
+  --output-dir results/raw_npz_scalars
 ```
 
 ## Visualize blobs

@@ -22,8 +22,8 @@ def trim_padding(x: torch.Tensor) -> torch.Tensor:
 
 def _chunk(x, lmax, centers, width, n_channels):
     pts, rho = x[..., :3], x[..., 3]
+    rho = rho.clamp_min(0)
     valid = (rho > 0).to(rho.dtype)
-    rho = rho * valid
     chans = torch.stack([rho, valid, rho * rho], dim=-1)[..., :n_channels]  # (B, N, C)
     chans = chans / chans.sum(1, keepdim=True).clamp(min=1e-8)
 
@@ -48,26 +48,3 @@ def sh_coefficients(x, lmax=6, n_shells=16, r_max=1.0, n_channels=3, chunk=1024,
             xc = trim_padding(xc)
         outs.append(_chunk(xc, lmax, centers, width, n_channels))
     return torch.cat(outs)
-
-
-@torch.no_grad()
-def global_features(x: torch.Tensor) -> torch.Tensor:
-    """9 rotation-invariant scalars the featurizer normalises away: (B, 9)."""
-    pts, rho = x[..., :3], x[..., 3]
-    valid = (rho > 0).to(x.dtype)
-    rho = rho * valid
-    n, s = valid.sum(1), rho.sum(1)
-    w = rho / s.clamp(min=1e-8)[:, None]
-    com = (pts * w[..., None]).sum(1, keepdim=True)
-    d = pts - com
-    r = d.norm(dim=-1)
-    rg = (w * r * r).sum(1).clamp(min=0).sqrt()
-    rmean = (w * r).sum(1)
-    rmax = rho.max(1).values
-    cov = torch.einsum("bn,bni,bnj->bij", w, d, d) + 1e-8 * torch.eye(3, device=x.device, dtype=x.dtype)
-    eig = torch.linalg.eigvalsh(cov).clamp(min=0).sqrt()
-    return torch.stack(
-        [torch.log1p(n), torch.log1p(s), torch.log1p(rmax), torch.log1p(s / n.clamp(min=1.0)),
-         rg, rmean, eig[:, 0], eig[:, 1], eig[:, 2]],
-        dim=-1,
-    )

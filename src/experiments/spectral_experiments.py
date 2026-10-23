@@ -37,6 +37,8 @@ def select(features, meta, channels, lmax):
     del meta, channels, lmax
     return features
 
+# Permit TensorFloat-32 matrix multiplies where supported; this favors GPU
+# throughput and does not change the point representation.
 torch.set_float32_matmul_precision("high")
 
 E3NN_LMAX_MAX = 11  # e3nn.o3.spherical_harmonics is implemented only up to l = 11
@@ -343,8 +345,11 @@ from hydra import compose, initialize
 from omegaconf import OmegaConf  # noqa: F401
 
 from src.models.e3nn.features import sh_coefficients
-from src.pipeline.dataset import BlobDataset
-from src.scripts.train import MAX_POINTS, build_data, check_config
+from src.pipeline.data_loader import MAX_POINTS, build_data
+from src.pipeline.global_statistics import (
+    complete_input_statistics_for_splits,
+    point_statistics,
+)
 from src.utils.set_seed import set_seed
 
 # ----------------------------------------------------------------------------- strict 2000-point protocol
@@ -379,14 +384,13 @@ CONFIGS = {
 
 # ----------------------------------------------------------------------------- data (raw, no cache)
 def load_raw():
-    """Raw clouds via the same build_data() that cache_features uses. x: (N, 2000, 4) = xyz + density."""
+    """Load normalized point tensors with shape ``(N, 2000, 4)``."""
     with initialize(config_path="../../configs", version_base=None):
         cfg = compose(config_name="config", overrides=[
-            f"paths.data_dir={DATA_DIR}", "model=points-2000-r3", f"model.n_shells={N_SHELLS}",
+            f"paths.data_dir={DATA_DIR}", "model=spectral", f"model.n_shells={N_SHELLS}",
             f"model.lmax={LMAX}", "machine.batch_size=256", "machine.num_workers=8"])
-    check_config(cfg)
     set_seed(cfg.random_seed)
-    tr, va, te = build_data(cfg, "points-2000-r3")
+    tr, va, te = build_data(cfg, "spectral")
     for name, ld in (("train", tr), ("val", va), ("test", te)):
         assert ld.x.shape[1] == MAX_POINTS, f"{name}: {ld.x.shape[1]} points, expected {MAX_POINTS}"
     return tr, va, te, int(cfg.train.out_channels)
@@ -395,70 +399,7 @@ def load_raw():
 @torch.no_grad()
 def point_globals(x: torch.Tensor, bs: int = 1024) -> torch.Tensor:
     """Compute winner globals from the same normalized 2000-point tensors as the model."""
-    out = []
-    for xb in x.split(bs):
-        pts, rho = xb[..., :3].float(), xb[..., 3].float()
-        valid = rho > 0
-        rho = rho.masked_fill(~valid, 0)
-        n, total = valid.sum(1).float(), rho.sum(1)
-        weights = rho / total.clamp_min(1e-8)[:, None]
-        center = (pts * weights[..., None]).sum(1, keepdim=True)
-        d = pts - center
-        radius = d.norm(dim=-1)
-        radius = radius.masked_fill(~valid, 0)
-        covariance = torch.einsum("bn,bni,bnj->bij", weights, d, d)
-        covariance = covariance + 1e-8 * torch.eye(3, device=xb.device)
-        eig = torch.linalg.eigvalsh(covariance).clamp_min(0).sqrt()
-        valid_points = valid.unsqueeze(-1)
-        mins = pts.masked_fill(~valid_points, 0).amin(1)
-        maxs = pts.masked_fill(~valid_points, 0).amax(1)
-        bbox = (maxs - mins).sort(dim=1).values
-        out.append(torch.stack([
-            torch.log1p(n), torch.log1p(total), torch.log1p(rho.max(1).values),
-            radius.max(1).values, (weights * radius.square()).sum(1).clamp_min(0).sqrt(),
-            (weights * radius).sum(1), eig[:, 0], eig[:, 1], eig[:, 2],
-            bbox[:, 0], bbox[:, 1], bbox[:, 2],
-        ], dim=-1).cpu())
-    return torch.cat(out)
-
-
-def raw_npz_globals(npz):
-    """The historical 12 scalars computed from the complete sparse NPZ blob."""
-    c = npz["indices"].astype(np.float64)
-    v = npz["values"].astype(np.float64)
-    total = v.sum()
-    weights = v / max(total, 1e-12)
-    centered = c - (c * weights[:, None]).sum(0)
-    radius = np.linalg.norm(centered, axis=1)
-    covariance = (centered * weights[:, None]).T @ centered
-    eig = np.sqrt(np.clip(np.linalg.eigvalsh(covariance), 0, None))
-    bbox = np.sort(c.max(0) - c.min(0))
-    return torch.tensor([
-        math.log1p(len(v)), math.log1p(total), math.log1p(v.max()),
-        radius.max(), math.sqrt(max((weights * radius * radius).sum(), 0)),
-        (weights * radius).sum(), *eig, *bbox,
-    ], dtype=torch.float32)
-
-
-def raw_npz_globals_for_splits(data_dir: Path, label_to_idx: dict, workers: int):
-    """Load raw NPZ scalars in the same deterministic order as the point datasets."""
-    result = {}
-    for split in ("train", "val", "test"):
-        dataset = BlobDataset(
-            path=str(data_dir / split),
-            transform=raw_npz_globals,
-            normalize=False,
-            cache=True,
-            num_workers=workers,
-            label_to_idx=label_to_idx,
-        )
-        result[split] = (
-            torch.stack([item[0] for item in dataset.cached_data]),
-            torch.tensor([item[1] for item in dataset.cached_data], dtype=torch.long),
-        )
-    return result
-
-
+    return point_statistics(x, batch_size=bs)
 def augment(x, point_dropout=POINT_DROPOUT, density_noise=DENSITY_NOISE, clean_probability=P_CLEAN):
     """Same ops as cache_features.augment, but sampled fresh per sample and per step."""
     pd, dn = point_dropout, density_noise
@@ -569,6 +510,8 @@ def run_job(name, net_ov, train_ov, seed, D, dev, epochs=None,
 # ----------------------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--report-only", action="store_true")
+    ap.add_argument("--output-dir", type=Path, default=OUT_DIR)
     ap.add_argument("--seeds", type=int, default=1)
     ap.add_argument("--seed_offset", type=int, default=200)
     ap.add_argument("--epochs", type=int, default=None)
@@ -576,6 +519,11 @@ def main():
     ap.add_argument("--no_check", action="store_true", help="skip comparing computed globals with cache/globals.pt")
     ap.add_argument("--force", action="store_true")
     a = ap.parse_args()
+    if a.report_only:
+        names = a.only.split(",") if a.only else list(CONFIGS)
+        report(names, a.output_dir, "acc")
+        return
+    names = [n for n in CONFIGS if not a.only or n in a.only.split(",")]
 
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -588,7 +536,6 @@ def main():
     D = dict(nc=nc, tr_x=tr.x, va_x=va.x, te_x=te.x, tr_y=tr.y.cpu(), va_y=va.y.cpu(), te_y=te.y.cpu(),
              g_tr=(g["tr"] - mu) / sd, g_va=(g["va"] - mu) / sd, g_te=(g["te"] - mu) / sd)
 
-    names = [n for n in CONFIGS if not a.only or n in a.only.split(",")]
     for name in names:
         net_ov, train_ov = CONFIGS[name]
         for s in range(a.seeds):
@@ -608,7 +555,7 @@ def main():
 def run_default_from_config(cfg, globals_mode="points_2000", output_dir=None):
     """Run the exact r3_bn_m32t protocol using an explicitly selected global-feature source."""
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    tr, va, te = build_data(cfg, "points-2000-r3")
+    tr, va, te = build_data(cfg, "spectral")
     for name, loader in (("train", tr), ("val", va), ("test", te)):
         if loader.x.shape[1] != MAX_POINTS:
             raise ValueError(f"{name} has {loader.x.shape[1]} points; expected {MAX_POINTS}")
@@ -616,12 +563,12 @@ def run_default_from_config(cfg, globals_mode="points_2000", output_dir=None):
     if globals_mode == "points_2000":
         globals_ = {name: point_globals(loader.x) for name, loader in
                     (("tr", tr), ("va", va), ("te", te))}
-    elif globals_mode == "raw_npz":
+    elif globals_mode == "complete_input":
         data_dir = Path(cfg.paths.data_dir)
         classes = sorted({d.name for split in ("train", "val", "test")
                           for d in (data_dir / split).iterdir() if d.is_dir()})
         label_to_idx = {name: i for i, name in enumerate(classes)}
-        raw = raw_npz_globals_for_splits(
+        raw = complete_input_statistics_for_splits(
             data_dir, label_to_idx, int(cfg.machine.num_workers)
         )
         expected = (tr.y.cpu(), va.y.cpu(), te.y.cpu())
@@ -672,7 +619,7 @@ def run_default_from_config(cfg, globals_mode="points_2000", output_dir=None):
         "glob_noise": model.glob_noise,
     }
     result = run_job(
-        "points-2000-r3",
+        "spectral",
         net,
         training,
         int(cfg.random_seed),
@@ -686,7 +633,7 @@ def run_default_from_config(cfg, globals_mode="points_2000", output_dir=None):
         clean_probability=model.clean_probability,
     )
     print(
-        f"points-2000-r3 seed {cfg.random_seed}: ep {result['epoch'] + 1:2d} | "
+        f"spectral seed {cfg.random_seed}: ep {result['epoch'] + 1:2d} | "
         f"val acc {result['val_acc']:.4f} loss {result['val_loss']:.4f} | "
         f"test acc {result['test_acc']:.4f} rec {result['test_rec']:.4f} | "
         f"{result['params'] / 1e6:.2f}M params, d_in {result['d_in']}, "

@@ -1,5 +1,5 @@
 defaults:
-  - model: points-2000-r3
+  - model: spectral
   - machine: hpc
   - _self_
 
@@ -8,6 +8,7 @@ train:
   learning_rate: 3e-3
   out_channels: 97
   normalize_data: true
+  precision: bf16-mixed
   weight_decay: 5e-2
   gradient_clip_val: null
   early_stopping:
@@ -23,3 +24,6 @@ wandb:
   run_name: null
 
 random_seed: 42
+
+global_statistics:
+  source: points_2000
