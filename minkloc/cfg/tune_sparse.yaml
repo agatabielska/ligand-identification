@@ -1,0 +1,59 @@
+project: ligans-hpo-2
+entity: agata-bielska
+seed: 42
+trials: 50
+trial_epochs: 10
+final_epochs: 15
+accum_iter: 1
+device: cuda
+num_workers: 8
+datasets:
+  - name: unthresholded-transform-probabilistic
+    path: ../data/unthresholded_transform_probabilistic
+  - name: thresholded-transform-probabilistic
+    path: ../data/thresholded_transform_probabilistic
+  - name: thresholded-transform-uniform
+    path: ../data/thresholded_transform_uniform
+search:
+  lr:
+    type: log_uniform
+    min: 0.00001
+    max: 0.01
+  weight_decay:
+    type: log_uniform
+    min: 0.0000001
+    max: 0.001
+  batch_size:
+    type: choice
+    values: [16, 32, 64, 128]
+  patience:
+    type: choice
+    values: [2]
+  planes:
+    type: choice
+    values:
+      - [64, 128, 64, 32]
+      - [128, 256, 128, 64]
+      - [192, 384, 192, 96]
+  layers:
+    type: choice
+    values:
+      - [2, 2, 2, 2]
+      - [4, 4, 4, 4]
+      - [6, 6, 6, 6]
+  num_top_down:
+    type: choice
+    values: [2, 3, 4]
+  conv0_kernel_size:
+    type: choice
+    values: [3, 5, 7]
+  feature_size:
+    type: choice
+    values: [128, 256, 384]
+  block:
+    type: choice
+    values: [BasicBlock, ECABasicBlock]
+  pooling:
+    type: choice
+    values: [netvlad, netvladgc]
+output_dir: logs/hpo
