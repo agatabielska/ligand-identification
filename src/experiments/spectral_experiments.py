@@ -39,7 +39,8 @@ def select(features, meta, channels, lmax):
 
 # Permit TensorFloat-32 matrix multiplies where supported; this favors GPU
 # throughput and does not change the point representation.
-torch.set_float32_matmul_precision("high")
+torch.backends.cuda.matmul.fp32_precision = "ieee"
+# torch.backends.cuda.matmul.fp32_precision = "tf32"
 
 E3NN_LMAX_MAX = 11  # e3nn.o3.spherical_harmonics is implemented only up to l = 11
 WANDB_PROJECT = "ligand-identification"  # same project as train.py

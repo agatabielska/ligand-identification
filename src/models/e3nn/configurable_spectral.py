@@ -184,7 +184,6 @@ class ConfigurableSpectralModel(pl.LightningModule):
     def forward(
         self,
         x: torch.Tensor,
-        global_x: torch.Tensor | None = None,
         global_values: torch.Tensor | None = None,
     ):
         with torch.autocast(device_type=x.device.type, enabled=False):
@@ -199,8 +198,7 @@ class ConfigurableSpectralModel(pl.LightningModule):
             features = self.net.features(coefficients)
             if self.global_branch is not None:
                 if global_values is None:
-                    source = x if global_x is None else global_x
-                    global_values = self.global_features(source)
+                    global_values = self.global_features(x)
                     global_values = (global_values - self.global_mean) / self.global_std
                     global_values = global_values[:, self.global_columns]
                 globals_ = self.global_branch(global_values)

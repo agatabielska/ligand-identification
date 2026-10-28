@@ -26,4 +26,4 @@ wandb:
 random_seed: 42
 
 global_statistics:
-  source: points_2000
+  source: complete_input
