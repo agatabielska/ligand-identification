@@ -15,29 +15,23 @@ MAX_POINTS = 2000
 POINT_CLOUD_TYPES = ("spectral",)
 
 
-def transform_clifford(npz, max_points: int = MAX_POINTS):
+def transform_clifford(npz):
     """Prepare coordinate-only input with shape ``(3, max_points)``."""
-    indices = npz["indices"]
-    if indices.shape[0] > max_points:
-        raise ValueError(f"Clifford input contains {indices.shape[0]} points; maximum is {max_points}")
-    points = np.pad(
-        indices,
-        ((0, max_points - indices.shape[0]), (0, 0)),
-        mode="constant",
-        constant_values=0,
-    )
-    return torch.from_numpy(points.astype(np.float32).transpose(1, 0))
+    indices = npz["indices"].astype(np.float32)
+    if indices.shape[0] > MAX_POINTS:
+        raise ValueError(f"Clifford input contains {indices.shape[0]} points; maximum is {MAX_POINTS}.")
+    points = np.zeros((MAX_POINTS, 3), dtype=np.float32)
+    points[: indices.shape[0], :3] = indices
+    return torch.from_numpy(points.transpose(1, 0))
 
 
-def transform_e3nn(npz, max_points: int = MAX_POINTS):
-    """Keep the highest-density points and return a zero-padded spectral tensor."""
+def transform_e3nn(npz):
+    """Prepare coordinate and density input with shape ``(max_points, 4)``."""
     coords = npz["indices"].astype(np.float32)
+    if coords.shape[0] > MAX_POINTS:
+        raise ValueError(f"e3nn input contains {coords.shape[0]} points; maximum is {MAX_POINTS}.")
     density = np.maximum(npz["values"].astype(np.float32), 0)
-    if coords.shape[0] > max_points:
-        keep = np.argsort(-density, kind="stable")[:max_points]
-        coords = coords[keep]
-        density = density[keep]
-    points = np.zeros((max_points, 4), dtype=np.float32)
+    points = np.zeros((MAX_POINTS, 4), dtype=np.float32)
     points[: coords.shape[0], :3] = coords
     points[: coords.shape[0], 3] = density
     return torch.from_numpy(points)
