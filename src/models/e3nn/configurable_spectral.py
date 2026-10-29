@@ -97,9 +97,6 @@ class ConfigurableSpectralModel(pl.LightningModule):
             norm=norm,
             in_bn=in_bn,
             mix_bn=mix_bn,
-            hidden=widths[0],
-            n_hidden=0,
-            feat_dropout=feat_dropout,
             bispec_mode=bispec_mode,
         )
 
@@ -152,7 +149,7 @@ class ConfigurableSpectralModel(pl.LightningModule):
                 n_channels=self.net.C,
                 chunk=self.chunk_size,
             )
-            features = self.net.features(coefficients)
+            features = self.net(coefficients)
             if self.global_branch is not None:
                 globals_ = self.global_branch(global_values)
                 features = torch.cat([features, globals_], dim=-1)

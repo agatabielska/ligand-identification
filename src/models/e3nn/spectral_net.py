@@ -68,10 +68,6 @@ class SpectralNet(nn.Module):
         norm: str = "layer",
         in_bn: bool = True,
         mix_bn: bool = True,
-        hidden: int = 1024,
-        n_hidden: int = 2,
-        dropout: float = 0.2,
-        feat_dropout: float = 0.0,
         bispec_mode: str = "loop",
     ):
         super().__init__()
@@ -138,40 +134,32 @@ class SpectralNet(nn.Module):
         d_bis = len(self.triples) * self.m
         self.d_in = d_gram + self.d_pow + d_bis
 
-        layers = [nn.LayerNorm(self.d_in) if norm == "layer" else nn.BatchNorm1d(self.d_in)]
-        if feat_dropout > 0:
-            layers.append(nn.Dropout(feat_dropout))
-        if n_hidden == 0:
-            layers.append(nn.Linear(self.d_in, num_classes))
-        elif n_hidden == 1:
-            layers += [nn.Linear(self.d_in, hidden), nn.GELU(), nn.Dropout(dropout),
-                       nn.Linear(hidden, num_classes)]
-        else:
-            layers += [nn.Linear(self.d_in, hidden), nn.GELU(), nn.Dropout(dropout),
-                       nn.Linear(hidden, hidden // 2), nn.GELU(), nn.Linear(hidden // 2, num_classes)]
-        self.head = nn.Sequential(*layers)
-
     # ---------------------------------------------------------------- features
     # TODO: "density_full" and "density" act only on channel 0
     def gram_features(self, c):
         if self.gram == "none":
             return []
+
         B = c.shape[0]
         c = c.reshape(B, self.K, self.C, -1)
-        if self.gram == "density_full":
-            parts = []
-            for l in range(self.lmax + 1):
-                cl = c[:, :, 0, l * l:(l + 1) ** 2]
-                parts.append((cl @ cl.transpose(1, 2)).flatten(1))
-            return [torch.cat(parts, -1)]
-        chans = [0] if self.gram == "density" else range(self.C)
+        
+        if self.gram in ("density_full", "density"):
+            channels = [0]
+        else: 
+            channels = range(self.C)
+
         parts = []
         for l in range(self.lmax + 1):
             cl = c[..., l * l:(l + 1) ** 2]  # (B, K, C, 2l+1)
-            for ch in chans:
+            for ch in channels:
                 x = cl[:, :, ch]
                 g = x @ x.transpose(1, 2)
-                parts.append(g[:, self.iu_k[0], self.iu_k[1]])
+                
+                if self.gram == "density_full":
+                    parts.append(g.flatten(1))
+                else:
+                    parts.append(g[:, self.iu_k[0], self.iu_k[1]])
+
         return [torch.cat(parts, -1)]
 
     def _bispec_loop(self, ts):
@@ -231,7 +219,6 @@ class SpectralNet(nn.Module):
         return slog(torch.cat(parts, -1))
 
     def forward(self, c):
-        # features stay fp32 (SH / tensor products are touchy in bf16); head follows ambient autocast
+        # features stay fp32 (SH / tensor products are touchy in bf16)
         with torch.autocast(device_type=c.device.type, enabled=False):
-            f = self.features(c.float())
-        return self.head(f)
+            return self.features(c.float())

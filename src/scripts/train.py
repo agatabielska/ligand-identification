@@ -25,9 +25,6 @@ def build_spectral_training(cfg: DictConfig):
     )
     model.set_class_counts(torch.bincount(train_loader.y, minlength=model.num_classes))
 
-    if cfg.global_statistics.source != "complete_input":
-        raise ValueError(f"Unknown global statistics source: {cfg.global_statistics.source!r}")
-
     # train loader is of form (x, y, global_values), where global_values is a tensor of shape (N, 12)
     global_train = torch.cat([batch[2] for batch in train_loader], dim=0)
     global_mean = global_train.mean(0)
