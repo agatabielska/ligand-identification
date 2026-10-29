@@ -12,7 +12,7 @@ from src.models.clifford.model import CliffordSteerableNetwork
 from src.models.e3nn.configurable_spectral import ConfigurableSpectralModel
 from src.pipeline.data_loader import build_data, validate_data_dir
 from src.utils.set_seed import set_seed
-    
+
     
 def build_spectral_training(cfg: DictConfig):
     loaders = build_data(cfg, "spectral")
@@ -23,10 +23,19 @@ def build_spectral_training(cfg: DictConfig):
         num_classes=int(train_cfg.out_channels),
         **OmegaConf.to_container(model_cfg, resolve=True),
     )
-    model.set_class_counts(torch.bincount(train_loader.y, minlength=model.num_classes))
+    
+    if hasattr(train_loader, "y"):
+        train_y = train_loader.y
+    else:
+        train_y = torch.cat([batch[1] for batch in train_loader], dim=0)
+    model.set_class_counts(torch.bincount(train_y, minlength=model.num_classes))
 
     # train loader is of form (x, y, global_values), where global_values is a tensor of shape (N, 12)
-    global_train = torch.cat([batch[2] for batch in train_loader], dim=0)
+    if hasattr(train_loader, "g"):
+        global_train = train_loader.g
+    else:
+        global_train = torch.cat([batch[2] for batch in train_loader], dim=0)
+
     global_mean = global_train.mean(0)
     global_std = global_train.std(0).clamp_min(1e-6)
     model.global_mean.copy_(global_mean)

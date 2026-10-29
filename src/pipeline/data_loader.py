@@ -13,7 +13,6 @@ from src.pipeline.global_statistics import complete_input_statistics
 
 
 MAX_POINTS = 2000
-POINT_CLOUD_TYPES = ("spectral",)
 
 
 def transform_clifford(npz):
@@ -142,8 +141,7 @@ def build_data(cfg: DictConfig, model_type: str):
     }
 
     batch_size, workers = cfg.machine.batch_size, cfg.machine.num_workers
-    # TODO: check if we can put all on GPULoader / do a better job of estimating memory requirements
-    if model_type in POINT_CLOUD_TYPES:
+    if cfg.machine.use_gpu_loader:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return tuple(
             GPULoader(datasets[split], batch_size, split == "train", device, workers)
