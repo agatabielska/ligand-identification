@@ -169,16 +169,17 @@ def preprocess(
     file_paths: List[Path],
     file_labels: List[str],
     output_path: Path,
+    number_of_datapoints: int = 2000,
     transform_stack: str = "probabilistic",
 ) -> None:
     if transform_stack == "uniform":
-        transforms = [UniformSelectionTransform(max_blob_size=2000, method="max")]
+        transforms = [UniformSelectionTransform(max_blob_size=number_of_datapoints, method="max")]
     elif transform_stack == "probabilistic":
-        transforms = [ProbabilisticSelectionTransform(max_blob_size=2000)]
+        transforms = [ProbabilisticSelectionTransform(max_blob_size=number_of_datapoints)]
     elif transform_stack == "normalization":
         transforms = [
             SpatialNormalization3(),
-            ProbabilisticSelectionTransform(max_blob_size=2000),
+            ProbabilisticSelectionTransform(max_blob_size=number_of_datapoints),
         ]
     else:
         raise ValueError(f"Unknown transform stack: {transform_stack}")
@@ -232,10 +233,22 @@ if __name__ == "__main__":
         help="Transform stack to apply during preprocessing.",
     )
     parser.add_argument(
+        "--number-of-datapoints",
+        type=int,
+        default=2000,
+        help="Number of datapoints to select from each blob during preprocessing.",
+    )
+    parser.add_argument(
         "--output-folder",
         type=str,
         required=True,
         help="Path to the output folder where preprocessed data will be saved.",
+    )
+    parser.add_argument(
+        "--filtered-output-folder",
+        type=str,
+        default=None,
+        help="Writable directory for the filtered intermediate dataset.",
     )
     parser.add_argument(
         "--n-splits",
@@ -269,10 +282,19 @@ if __name__ == "__main__":
         raise ValueError(f"filter_cryoem_classes.sh not found at {filter_script}")
     else:
         import subprocess
-        subprocess.run(["bash", str(filter_script), args.raw_data_dir], check=True)
+        filter_args = ["bash", str(filter_script), args.raw_data_dir]
+        if args.filtered_output_folder:
+            filter_args.append(args.filtered_output_folder)
+        subprocess.run(filter_args, check=True)
         print("Finished running filter_cryoem_classes.sh.")
         
-    filtered_data_dir = Path(f"data/filtered_{args.raw_data_dir}")
+    raw_data_dir = Path(args.raw_data_dir)
+    if raw_data_dir.is_absolute():
+        filtered_data_dir = Path(
+            args.filtered_output_folder or f"{raw_data_dir}_filtered"
+        )
+    else:
+        filtered_data_dir = Path(f"data/filtered_{args.raw_data_dir}")
     if not filtered_data_dir.exists():
         raise ValueError(f"Filtered data directory not found: {filtered_data_dir}. Please run filter_cryoem_classes.sh to create it.")
 
@@ -301,18 +323,21 @@ if __name__ == "__main__":
             futures.append(pool.submit(
                 preprocess, sublist, sublabels,
                 output_folder / "train",
+                number_of_datapoints=args.number_of_datapoints,
                 transform_stack=args.transform_stack,
             ))
         for sublist, sublabels in chunk(val_files, val_labels, args.chunk_size):
             futures.append(pool.submit(
                 preprocess, sublist, sublabels,
                 output_folder / "val",
+                number_of_datapoints=args.number_of_datapoints,
                 transform_stack=args.transform_stack,
             ))
         for sublist, sublabels in chunk(test_files, test_labels, args.chunk_size):
             futures.append(pool.submit(
                 preprocess, sublist, sublabels,
                 output_folder / "test",
+                number_of_datapoints=args.number_of_datapoints,
                 transform_stack=args.transform_stack,
             ))            
     wait(futures)
