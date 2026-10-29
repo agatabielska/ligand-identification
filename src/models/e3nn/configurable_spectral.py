@@ -102,7 +102,6 @@ class ConfigurableSpectralModel(pl.LightningModule):
             feat_dropout=feat_dropout,
             bispec_mode=bispec_mode,
         )
-        self.net.head = nn.Identity()
 
         d_in = self.net.d_in
         if self.global_columns:
@@ -228,7 +227,7 @@ class ConfigurableSpectralModel(pl.LightningModule):
             # Size features describe the clean sample, not the stochastic
             # training mask. Their mean and standard deviation are fitted once
             # from the complete training split by set_global_stats().
-            global_values = global_batch[0] if global_batch else self.global_features(x)
+            global_values = global_batch[0] if global_batch else None
             global_values = (global_values - self.global_mean) / self.global_std
             global_values = global_values[:, self.global_columns]
             if self.glob_noise > 0:
@@ -243,8 +242,9 @@ class ConfigurableSpectralModel(pl.LightningModule):
     def _eval_step(self, batch, prefix: str, recall):
         x, y, *global_batch = batch
         y = y.view(-1)
-        global_values = global_batch[0] if global_batch else None
-        if global_values is not None and self.global_branch is not None:
+        global_values = None
+        if self.global_branch is not None:
+            global_values = global_batch[0] if global_batch else None
             global_values = (global_values - self.global_mean) / self.global_std
             global_values = global_values[:, self.global_columns]
         logits = self(x, global_values=global_values).float()

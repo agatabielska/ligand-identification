@@ -33,7 +33,7 @@ def build_clifford_model(cfg: DictConfig):
     )
 
 
-def _spectral_global_features(cfg: DictConfig, loaders, splits=("train", "val", "test")):
+def _spectral_global_features(cfg: DictConfig, loaders, splits=("train", "val", "test")) -> tuple[torch.Tensor, ...]:
     if cfg.global_statistics.source == "points_2000":
         return tuple(point_statistics(loader.x) for loader in loaders)
     if cfg.global_statistics.source == "complete_input":
@@ -49,6 +49,7 @@ def _spectral_global_features(cfg: DictConfig, loaders, splits=("train", "val", 
             data_dir, label_to_idx, int(cfg.machine.num_workers), splits
         )
         return tuple(values[split][0] for split in splits)
+    raise ValueError(f"Unknown global statistics source: {cfg.global_statistics.source!r}")
 
 def _spectral_loader(x, y, globals_, batch_size, shuffle):
     return DataLoader(

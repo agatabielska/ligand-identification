@@ -111,7 +111,6 @@ def validate_data_dir(data_dir: Path):
 def build_data(cfg: DictConfig, model_type: str):
     """Build train, validation, and test loaders for a configured model."""
     data_dir = Path(cfg.paths.data_dir)
-    validate_data_dir(data_dir)
     splits = ("train", "val", "test")
     classes = sorted(
         {directory.name for split in splits for directory in (data_dir / split).iterdir() if directory.is_dir()}
@@ -122,10 +121,9 @@ def build_data(cfg: DictConfig, model_type: str):
         split: get_dataset(data_dir / split, cfg, transform, label_to_idx)
         for split in splits
     }
-    if cfg.train.get("train_on_val", False):
-        datasets["train"] = ConcatDataset([datasets["train"], datasets["val"]])
 
     batch_size, workers = cfg.machine.batch_size, cfg.machine.num_workers
+    # TODO: check if we can put all on GPULoader / do a better job of estimating memory requirements
     if model_type in POINT_CLOUD_TYPES:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return tuple(
