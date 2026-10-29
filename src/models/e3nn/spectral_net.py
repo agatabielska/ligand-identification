@@ -31,10 +31,11 @@ from e3nn.nn import BatchNorm
 from e3nn.o3 import Irreps, Linear, wigner_3j
 
 
-def build_degree_irreps(multiplicity: int, first_degree: int, last_degree: int) -> Irreps:
+def build_degree_irreps(multiplicity: int, first_degree: int, last_degree: int, reflection_equivariant: bool) -> Irreps:
     """Build one irrep block for each angular degree in an inclusive range."""
     l_from, l_to = first_degree, last_degree
-    return Irreps([(multiplicity, (l, (-1) ** l)) for l in range(l_from, l_to + 1)])
+    base = -1 if reflection_equivariant else 1
+    return Irreps([(multiplicity, (l, base ** l)) for l in range(l_from, l_to + 1)])
 
 
 def slog(f: torch.Tensor) -> torch.Tensor:
@@ -69,6 +70,7 @@ class SpectralNet(nn.Module):
         in_bn: bool = True,
         mix_bn: bool = True,
         bispec_mode: str = "loop",
+        reflection_equivariant: bool = True,
     ):
         super().__init__()
         assert gram in ("none", "density_full", "density", "all")
@@ -80,10 +82,10 @@ class SpectralNet(nn.Module):
         self.gram, self.bispec_mode, self.pow_mode = gram, bispec_mode, pow_mode
         self.m = n_mix if n_mix > 0 else K * C  # channels per degree after the (optional) mix
 
-        irreps_in = build_degree_irreps(K * C, 0, lmax)
+        irreps_in = build_degree_irreps(K * C, 0, lmax, reflection_equivariant)
         self.in_bn = BatchNorm(irreps_in) if in_bn else nn.Identity()
         if n_mix > 0:
-            irreps_mix = build_degree_irreps(n_mix, 0, lmax)
+            irreps_mix = build_degree_irreps(n_mix, 0, lmax, reflection_equivariant)
             self.mix = Linear(irreps_in, irreps_mix)
             self.mix_bn = BatchNorm(irreps_mix) if mix_bn else nn.Identity()
         else:

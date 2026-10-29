@@ -10,6 +10,7 @@ gram: none
 triples: nonzero
 bispec_lmax: 6
 bispec_mode: batched
+reflection_equivariant: true
 norm: layer
 in_bn: false
 use_globals: none
