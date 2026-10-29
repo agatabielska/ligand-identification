@@ -6,9 +6,10 @@ from pathlib import Path
 import numpy as np
 import torch
 from omegaconf import DictConfig
-from torch.utils.data import ConcatDataset, DataLoader
+from torch.utils.data import DataLoader
 
 from src.pipeline.dataset import BlobDataset
+from src.pipeline.global_statistics import complete_input_statistics
 
 
 MAX_POINTS = 2000
@@ -42,9 +43,13 @@ class GPULoader:
 
     def __init__(self, dataset, batch_size: int, shuffle: bool, device, num_workers: int = 0):
         loader = DataLoader(dataset, batch_size=256, shuffle=False, num_workers=min(num_workers, 8))
-        samples = [(x, torch.as_tensor(y).reshape(-1)) for x, y in loader]
+        samples = [(x, torch.as_tensor(y).reshape(-1), *rest) for x, y, *rest in loader]
         x = torch.cat([sample[0] for sample in samples])
         y = torch.cat([sample[1] for sample in samples]).long()
+        
+        g = None
+        if samples[0][2] is not None:
+            g = torch.cat([sample[2] for sample in samples])
 
         self.batch_size = batch_size
         self.shuffle = shuffle
@@ -53,6 +58,7 @@ class GPULoader:
         if device.type == "cuda":
             try:
                 self.x, self.y = x.to(device), y.to(device)
+                self.g = g.to(device) if g is not None else None
                 self.on_gpu = True
             except torch.cuda.OutOfMemoryError:
                 torch.cuda.empty_cache()
@@ -63,6 +69,7 @@ class GPULoader:
         if not self.on_gpu:
             self.x = x.pin_memory() if device.type == "cuda" else x
             self.y = y
+            self.g = (g.pin_memory() if device.type == "cuda" else g) if g is not None else None
 
     def __len__(self):
         return math.ceil(len(self.y) / self.batch_size)
@@ -78,16 +85,19 @@ class GPULoader:
         for start in range(0, count, self.batch_size):
             batch_indices = indices[start : start + self.batch_size]
             x, y = self.x[batch_indices], self.y[batch_indices]
+            g = self.g[batch_indices] if self.g is not None else None
             if not self.on_gpu:
                 x = x.to(self.device, non_blocking=True)
                 y = y.to(self.device, non_blocking=True)
-            yield x, y
+                g = g.to(self.device, non_blocking=True) if g is not None else None
+            yield (x, y, g) if g is not None else (x, y)
 
 
-def get_dataset(path: Path, cfg: DictConfig, transform, label_to_idx: dict):
+def get_dataset(path: Path, cfg: DictConfig, transform, label_to_idx: dict, global_transform=None):
     return BlobDataset(
         path=str(path),
         transform=transform,
+        global_transform=global_transform,
         normalize=cfg.train.normalize_data,
         cache=cfg.machine.cache_dataset,
         num_workers=cfg.machine.num_workers,
@@ -110,15 +120,24 @@ def validate_data_dir(data_dir: Path):
 
 def build_data(cfg: DictConfig, model_type: str):
     """Build train, validation, and test loaders for a configured model."""
+    match model_type:
+        case "clifford":
+            transform = transform_clifford
+            global_transform = None
+        case "spectral":
+            transform = transform_e3nn
+            global_transform = complete_input_statistics
+        case _:
+            raise ValueError(f"Unknown model type: {model_type}")
+        
     data_dir = Path(cfg.paths.data_dir)
     splits = ("train", "val", "test")
     classes = sorted(
         {directory.name for split in splits for directory in (data_dir / split).iterdir() if directory.is_dir()}
     )
     label_to_idx = {name: index for index, name in enumerate(classes)}
-    transform = transform_clifford if model_type == "clifford" else transform_e3nn
     datasets = {
-        split: get_dataset(data_dir / split, cfg, transform, label_to_idx)
+        split: get_dataset(data_dir / split, cfg, transform, label_to_idx, global_transform=global_transform)
         for split in splits
     }
 

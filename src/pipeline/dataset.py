@@ -11,6 +11,7 @@ class BlobDataset(Dataset):
         self,
         path: str,
         transform=None,
+        global_transform=None,
         normalize=False,
         cache: bool = False,
         num_workers: int = 8,
@@ -19,6 +20,7 @@ class BlobDataset(Dataset):
         self.path = Path(path)
         self.cache = cache
         self.transform = transform
+        self.global_transform = global_transform
         self.normalize = normalize
         self.samples = []
         self.num_workers = num_workers
@@ -64,6 +66,8 @@ class BlobDataset(Dataset):
 
         # Convert to dict so that we can modify it in place
         npz = dict(npz)
+        
+        g = self.global_transform(npz) if self.global_transform else None
 
         if self.normalize:
             npz["indices"] = self.pc_normalize(npz["indices"])
@@ -73,12 +77,13 @@ class BlobDataset(Dataset):
             vals = npz["values"]
             shape = tuple(npz["shape"])
 
-            A = np.zeros(shape, dtype=vals.dtype)
-            A[idx[:, 0], idx[:, 1], idx[:, 2]] = vals
-            A = torch.from_numpy(A)
-            return A, label
+            x = np.zeros(shape, dtype=vals.dtype)
+            x[idx[:, 0], idx[:, 1], idx[:, 2]] = vals
+            x = torch.from_numpy(x)
+            return (x, label, g) if g is not None else (x, label)
         else:
-            return self.transform(npz), label
+            x = self.transform(npz)
+            return (x, label, g) if g is not None else (x, label)
 
     def __getitem__(self, idx):
         if self.cache:

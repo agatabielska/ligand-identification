@@ -11,56 +11,9 @@ from torch.utils.data import DataLoader, TensorDataset
 from src.models.clifford.model import CliffordSteerableNetwork
 from src.models.e3nn.configurable_spectral import ConfigurableSpectralModel
 from src.pipeline.data_loader import build_data, validate_data_dir
-from src.pipeline.global_statistics import (
-    complete_input_statistics_for_splits,
-    point_statistics,
-)
 from src.utils.set_seed import set_seed
-
-
-def build_clifford_model(cfg: DictConfig):
-    model_cfg, train_cfg = cfg.model, cfg.train
-    return CliffordSteerableNetwork(
-        p=model_cfg.p,
-        q=model_cfg.q,
-        in_channels=model_cfg.in_channels,
-        hidden_channels=model_cfg.hidden_channels,
-        out_channels=train_cfg.out_channels,
-        n_shells=model_cfg.n_shells,
-        kernel_size=model_cfg.kernel_size,
-        learning_rate=train_cfg.learning_rate,
-        weight_decay=train_cfg.weight_decay,
-    )
-
-
-def _spectral_global_features(cfg: DictConfig, loaders, splits=("train", "val", "test")) -> tuple[torch.Tensor, ...]:
-    if cfg.global_statistics.source == "points_2000":
-        return tuple(point_statistics(loader.x) for loader in loaders)
-    if cfg.global_statistics.source == "complete_input":
-        data_dir = Path(cfg.paths.data_dir)
-        classes = sorted(
-            directory.name
-            for split in ("train", "val", "test")
-            for directory in (data_dir / split).iterdir()
-            if directory.is_dir()
-        )
-        label_to_idx = {name: index for index, name in enumerate(classes)}
-        values = complete_input_statistics_for_splits(
-            data_dir, label_to_idx, int(cfg.machine.num_workers), splits
-        )
-        return tuple(values[split][0] for split in splits)
-    raise ValueError(f"Unknown global statistics source: {cfg.global_statistics.source!r}")
-
-def _spectral_loader(x, y, globals_, batch_size, shuffle):
-    return DataLoader(
-        TensorDataset(x.cpu(), y.cpu().view(-1), globals_.cpu()),
-        batch_size=batch_size,
-        shuffle=shuffle,
-        num_workers=0,
-        pin_memory=torch.cuda.is_available(),
-    )
-
-
+    
+    
 def build_spectral_training(cfg: DictConfig):
     loaders = build_data(cfg, "spectral")
     train_loader, validation_loader, test_loader = loaders
@@ -71,43 +24,34 @@ def build_spectral_training(cfg: DictConfig):
         **OmegaConf.to_container(model_cfg, resolve=True),
     )
     model.set_class_counts(torch.bincount(train_loader.y, minlength=model.num_classes))
-    if cfg.global_statistics.source == "points_2000":
-        model.set_global_stats(train_loader.x)
-        return model, loaders
 
     if cfg.global_statistics.source != "complete_input":
         raise ValueError(f"Unknown global statistics source: {cfg.global_statistics.source!r}")
 
-    global_train = _spectral_global_features(cfg, (train_loader,), ("train",))[0]
+    # train loader is of form (x, y, global_values), where global_values is a tensor of shape (N, 12)
+    global_train = torch.cat([batch[2] for batch in train_loader], dim=0)
     global_mean = global_train.mean(0)
     global_std = global_train.std(0).clamp_min(1e-6)
     model.global_mean.copy_(global_mean)
     model.global_std.copy_(global_std)
-    global_validation, global_test = _spectral_global_features(
-        cfg, (validation_loader, test_loader), ("val", "test")
-    )
-    return model, (
-        _spectral_loader(train_loader.x, train_loader.y, global_train, cfg.machine.batch_size, True),
-        _spectral_loader(
-            validation_loader.x,
-            validation_loader.y,
-            global_validation,
-            cfg.machine.batch_size,
-            False,
-        ),
-        _spectral_loader(
-            test_loader.x,
-            test_loader.y,
-            global_test,
-            cfg.machine.batch_size,
-            False,
-        ),
-    )
+    return model, loaders
 
 
 def build_clifford_training(cfg: DictConfig):
     train_loader, validation_loader, test_loader = build_data(cfg, "clifford")
-    return build_clifford_model(cfg), (train_loader, validation_loader, test_loader)
+    model_cfg, train_cfg = cfg.model, cfg.train
+    model = CliffordSteerableNetwork(
+        p=model_cfg.p,
+        q=model_cfg.q,
+        in_channels=model_cfg.in_channels,
+        hidden_channels=model_cfg.hidden_channels,
+        out_channels=train_cfg.out_channels,
+        n_shells=model_cfg.n_shells,
+        kernel_size=model_cfg.kernel_size,
+        learning_rate=train_cfg.learning_rate,
+        weight_decay=train_cfg.weight_decay,
+    )
+    return model, (train_loader, validation_loader, test_loader)
 
 
 TRAINING_BUILDERS = {

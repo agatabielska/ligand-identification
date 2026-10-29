@@ -12,7 +12,7 @@ bispec_lmax: 6
 bispec_mode: batched
 norm: layer
 in_bn: false
-use_globals: all
+use_globals: none
 glob_dim: 64
 glob_noise: 0.0
 widths: [512, 256]

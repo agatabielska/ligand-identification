@@ -1,12 +1,9 @@
 """Global scalar feature computation for spectral training."""
 
 import math
-from pathlib import Path
 
 import numpy as np
 import torch
-
-from src.pipeline.dataset import BlobDataset
 
 
 def point_statistics(x: torch.Tensor, batch_size: int = 1024) -> torch.Tensor:
@@ -68,25 +65,3 @@ def complete_input_statistics(npz) -> torch.Tensor:
         ],
         dtype=torch.float32,
     )
-
-
-def complete_input_statistics_for_splits(
-    data_dir: Path, label_to_idx: dict, workers: int,
-    splits: tuple[str, ...] = ("train", "val", "test"),
-) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
-    """Load complete-input statistics in the same order as point datasets."""
-    result = {}
-    for split in splits:
-        dataset = BlobDataset(
-            path=str(data_dir / split),
-            transform=complete_input_statistics,
-            normalize=False,
-            cache=True,
-            num_workers=workers,
-            label_to_idx=label_to_idx,
-        )
-        result[split] = (
-            torch.stack([item[0] for item in dataset.cached_data]),
-            torch.tensor([item[1] for item in dataset.cached_data], dtype=torch.long),
-        )
-    return result
