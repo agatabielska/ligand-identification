@@ -152,6 +152,7 @@ class SpectralNet(nn.Module):
         self.head = nn.Sequential(*layers)
 
     # ---------------------------------------------------------------- features
+    # TODO: "density_full" and "density" act only on channel 0
     def gram_features(self, c):
         if self.gram == "none":
             return []

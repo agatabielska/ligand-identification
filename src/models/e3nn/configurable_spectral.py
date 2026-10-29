@@ -16,9 +16,9 @@ from src.utils.metrics import compute_metrics
 # The groups let the configuration select all, geometry-only, count-only, or no scalars.
 GLOBAL_FEATURE_INDICES = {
     "none": (),
-    "all": tuple(range(12)),
-    "geom": tuple(range(3, 12)),
-    "count": (0, 1, 2),
+    "all": tuple(range(11)),
+    "geom": tuple(range(2, 11)),
+    "count": (0, 1),
 }
 
 

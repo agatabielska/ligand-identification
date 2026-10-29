@@ -12,7 +12,6 @@ def point_statistics(x: torch.Tensor, batch_size: int = 1024) -> torch.Tensor:
     for batch in x.split(batch_size):
         points, density = batch[..., :3].float(), batch[..., 3].float().clamp_min(0)
         valid = density > 0
-        count = valid.sum(1).float()
         total = density.sum(1)
         weights = density / total.clamp_min(1e-8)[:, None]
         center = (points * weights[..., None]).sum(1, keepdim=True)
@@ -26,7 +25,7 @@ def point_statistics(x: torch.Tensor, batch_size: int = 1024) -> torch.Tensor:
         maxs = points.masked_fill(~valid_points, 0).amax(1)
         bounds = (maxs - mins).sort(dim=1).values
         counts = torch.stack(
-            (torch.log1p(count), torch.log1p(total), torch.log1p(density.amax(1))),
+            (torch.log1p(total), torch.log1p(density.amax(1))),
             dim=1,
         )
         radii = torch.stack(
