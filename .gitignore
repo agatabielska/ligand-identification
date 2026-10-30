@@ -18,3 +18,25 @@
 /allocate*
 
 /slurm/
+
+# MinkLoc-generated files
+/minkloc/data/
+/minkloc/logs/
+/minkloc/output/
+/minkloc/outputs/
+/minkloc/checkpoints/
+/minkloc/wandb/
+/minkloc/scripts/checkpoints/
+/minkloc/scripts/logs/
+/minkloc/scripts/wandb/
+/minkloc/.neptune/
+/minkloc/.idea/
+/minkloc/.ipynb_checkpoints/
+/minkloc/blob_details/output/
+/minkloc/*.o
+
+# MinkLoc local configuration
+/minkloc/venv/
+/minkloc/MEtestvenv/
+/minkloc/cfg/neptune.yaml
+/minkloc/docker/.env

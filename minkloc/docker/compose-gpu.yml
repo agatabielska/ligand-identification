@@ -1,0 +1,26 @@
+# Adapted from https://github.com/jkarolczak/ligand-classification
+
+services:
+  minkowski_gpu:
+    build:
+      args:
+        PYTORCH: ${PYTORCH}
+        CUDA: ${CUDA}
+        CUDNN: ${CUDNN}
+      context: ..
+      dockerfile: docker/DockerfileGPU
+    #make it smaller for smaller hosts
+    shm_size: "16gb"
+    volumes:
+      - "../:/app:rw"
+      - "${DATA_PATH}:/app/data:rw"
+    working_dir: /app/scripts
+    tty: true
+    stdin_open: true
+    network_mode: "host"
+    entrypoint: /bin/bash
+    runtime: nvidia
+    environment:
+      MKL_THREADING_LAYER: 1
+      NVIDIA_VISIBLE_DEVICES: all        # ← THIS gives all GPUs
+      NVIDIA_DRIVER_CAPABILITIES: all   

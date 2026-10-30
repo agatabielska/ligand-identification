@@ -1,0 +1,28 @@
+ARG PYTORCH
+ARG CUDA
+ARG CUDNN
+ARG DEBIAN_FRONTEND=noninteractive
+
+FROM pytorch/pytorch:${PYTORCH}-cuda${CUDA}-cudnn${CUDNN}-devel
+
+# environment setup
+ENV TORCH_CUDA_ARCH_LIST="6.0 6.1 7.0+PTX 8.0"
+ENV TORCH_NVCC_FLAGS="-Xfatbin -compress-all"
+ENV CUBLAS_WORKSPACE_CONFIG=":4096:8"
+ENV PYTHONPATH="/app/src"
+
+# common dependencies
+RUN apt-get update --fix-missing
+RUN apt-get install -y git ninja-build cmake build-essential libopenblas-dev \
+    xterm xauth openssh-server tmux wget mate-desktop-environment-core libssl-dev
+
+RUN apt-get clean
+RUN rm -rf /var/lib/apt/lists/*
+
+RUN pip install scikit-learn==1.0.2 pandas==1.3.5 torchmetrics==0.7.3 addict==2.4.0 yapf==0.32.0 neptune-client h5py wget optuna==2.10.1 tqdm wandb
+
+# MinkowskiEngine for sparse NN operators
+ENV MAX_JOBS=8
+RUN pip install -U git+https://github.com/NVIDIA/MinkowskiEngine -v --no-deps \
+                           --install-option="--force_cuda" \
+                           --install-option="--blas=openblas"
