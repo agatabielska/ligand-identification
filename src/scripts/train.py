@@ -21,6 +21,7 @@ def build_spectral_training(cfg: DictConfig):
     model_cfg, train_cfg = cfg.model, cfg.train
     model = ConfigurableSpectralModel(
         num_classes=int(train_cfg.out_channels),
+        loss_cfg=train_cfg.get("loss"),
         **OmegaConf.to_container(model_cfg, resolve=True),
     )
     model.set_class_counts(torch.bincount(train_loader.y, minlength=model.num_classes))
@@ -64,13 +65,20 @@ def run_training(cfg: DictConfig):
 
     model, (train_loader, validation_loader, test_loader) = TRAINING_BUILDERS[model_type](cfg)
     logger_kwargs = {
-        "project": "ligand-identification",
+        "project": cfg.wandb.get("project", "ligand-identification"),
         "config": OmegaConf.to_container(cfg, resolve=True),
     }
     if cfg.wandb.run_name is not None:
         logger_kwargs["name"] = cfg.wandb.run_name
+    if cfg.wandb.get("tags"):
+        logger_kwargs["tags"] = list(cfg.wandb.tags)
+    if run_name := cfg.wandb.get("run_name"):
+        logger_kwargs["id"] = str(run_name)
     logger = WandbLogger(**logger_kwargs)
-    checkpoint_dir = Path(cfg.paths.model_checkpoint) / logger.experiment.name
+    wandb_run = logger.experiment
+    checkpoint_dir = Path(cfg.paths.model_checkpoint) / (
+        str(run_name) if run_name else logger.experiment.name
+    )
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     early_stopping = cfg.train.early_stopping
     trainer = pl.Trainer(
@@ -99,8 +107,11 @@ def run_training(cfg: DictConfig):
         logger=logger,
         gradient_clip_val=cfg.train.gradient_clip_val,
     )
-    trainer.fit(model, train_loader, validation_loader)
-    trainer.test(ckpt_path="best", dataloaders=test_loader)
+    try:
+        trainer.fit(model, train_loader, validation_loader)
+        trainer.test(ckpt_path="best", dataloaders=test_loader)
+    finally:
+        wandb_run.finish()
 
 
 @hydra.main(config_path="../../configs", config_name="config", version_base=None)
