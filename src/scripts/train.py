@@ -14,8 +14,8 @@ from src.pipeline.data_loader import build_data, validate_data_dir
 from src.utils.set_seed import set_seed
     
     
-def build_spectral_training(cfg: DictConfig):
-    loaders = build_data(cfg, "spectral")
+def build_spectral_training(cfg: DictConfig, loaders=None):
+    loaders = loaders or build_data(cfg, "spectral")
     train_loader, validation_loader, test_loader = loaders
 
     model_cfg, train_cfg = cfg.model, cfg.train
@@ -35,8 +35,8 @@ def build_spectral_training(cfg: DictConfig):
     return model, loaders
 
 
-def build_clifford_training(cfg: DictConfig):
-    train_loader, validation_loader, test_loader = build_data(cfg, "clifford")
+def build_clifford_training(cfg: DictConfig, loaders=None):
+    train_loader, validation_loader, test_loader = loaders or build_data(cfg, "clifford")
     model_cfg, train_cfg = cfg.model, cfg.train
     model = CliffordSteerableNetwork(
         p=model_cfg.p,
@@ -58,12 +58,14 @@ TRAINING_BUILDERS = {
 }
 
 
-def run_training(cfg: DictConfig):
+def run_training(cfg: DictConfig, data_loaders=None):
     model_type = cfg.model.type
     if model_type not in TRAINING_BUILDERS:
         raise ValueError(f"Unknown model type: {model_type}")
 
-    model, (train_loader, validation_loader, test_loader) = TRAINING_BUILDERS[model_type](cfg)
+    model, (train_loader, validation_loader, test_loader) = TRAINING_BUILDERS[model_type](
+        cfg, data_loaders
+    )
     logger_kwargs = {
         "project": cfg.wandb.get("project", "ligand-identification"),
         "config": OmegaConf.to_container(cfg, resolve=True),

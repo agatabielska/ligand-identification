@@ -7,13 +7,14 @@ from omegaconf import DictConfig
 
 
 DEFINED_LOSSES = (
-    # {"name": "baseline", "label_smoothing": 0.05},
-    # {"name": "weighted_ce"},
-    # {"name": "logit_adjusted_ce", "tau": 1.0},
-    # {"name": "baseline", "label_smoothing": 0.1},      # Stronger regularization
-    # {"name": "baseline", "label_smoothing": 0.15}, 
-    # {"name": "logit_adjusted_ce", "tau": 0.5},       # Softer adjustment (tau=0.5 to 1.0)
-    # {"name": "logit_adjusted_ce", "tau": 1.0},
+    {"name": "baseline", "label_smoothing": 0.05},
+    {"name": "weighted_ce"},
+    {"name": "baseline", "label_smoothing": 0.1},
+    {"name": "baseline", "label_smoothing": 0.125},
+    {"name": "baseline", "label_smoothing": 0.15}, 
+    {"name": "logit_adjusted_ce", "tau": 0.5}, 
+    {"name": "logit_adjusted_ce", "tau": 0.75},
+    {"name": "logit_adjusted_ce", "tau": 1.0},
     {"name": "focal", "gamma": 0.5},
     {"name": "focal", "gamma": 1.0},
     {"name": "focal", "gamma": 1.5},
