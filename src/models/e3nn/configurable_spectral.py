@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torchmetrics
 
+from src.experiments.ensemble3models.losses import build_loss
 from src.models.e3nn.features import sh_coefficients
 from src.models.e3nn.spectral_net import SpectralNet
 from src.utils.metrics import compute_metrics
@@ -44,6 +45,7 @@ class ConfigurableSpectralModel(pl.LightningModule):
         in_bn: bool = False,
         mix_bn: bool = True,
         use_globals: str = "all",
+        spatial_noise: float = 0.0,
         glob_dim: int = 64,
         glob_noise: float = 0.0,
         widths: tuple[int, ...] = (512, 256),
@@ -53,6 +55,7 @@ class ConfigurableSpectralModel(pl.LightningModule):
         density_noise: float = 0.0,
         clean_probability: float = 0.125,
         label_smoothing: float = 0.05,
+        loss_cfg: dict | None = None,
         warmup_frac: float = 0.03,
         chunk_size: int = 128,
         **_,
@@ -74,14 +77,21 @@ class ConfigurableSpectralModel(pl.LightningModule):
         self.glob_noise = glob_noise
         self.clean_probability = clean_probability
         self.label_smoothing = label_smoothing
+        self.loss_cfg = loss_cfg
         self.warmup_frac = warmup_frac
         self.chunk_size = chunk_size
         self.use_globals = use_globals
+        self.spatial_noise = spatial_noise
         self.global_columns = GLOBAL_FEATURE_INDICES[use_globals]
         self.glob_dim = glob_dim
         self.register_buffer("log_prior", torch.zeros(num_classes))
         self.register_buffer("global_mean", torch.zeros(12))
         self.register_buffer("global_std", torch.ones(12))
+        self.loss_fn = build_loss(
+            loss_cfg,
+            torch.ones(num_classes, dtype=torch.long),
+            self.log_prior,
+        )
 
         self.net = SpectralNet(
             num_classes=num_classes,
@@ -134,12 +144,20 @@ class ConfigurableSpectralModel(pl.LightningModule):
     def set_class_counts(self, counts: torch.Tensor):
         prior = (counts.float() + 1.0) / (counts.sum() + len(counts))
         self.log_prior.copy_(prior.log().to(self.log_prior.device))
+        self.loss_fn = build_loss(self.loss_cfg, counts, self.log_prior)
 
     def forward(
         self,
         x: torch.Tensor,
         global_values: torch.Tensor | None = None,
     ):
+        return self.head(self.encode_features(x, global_values))
+
+    def encode_features(
+        self,
+        x: torch.Tensor,
+        global_values: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         with torch.autocast(device_type=x.device.type, enabled=False):
             coefficients = sh_coefficients(
                 x.float(),
@@ -153,7 +171,7 @@ class ConfigurableSpectralModel(pl.LightningModule):
             if self.global_branch is not None:
                 globals_ = self.global_branch(global_values)
                 features = torch.cat([features, globals_], dim=-1)
-        return self.head(features)
+        return features
 
     def _augment(self, x: torch.Tensor) -> torch.Tensor:
         """Mask densities for point dropout while retaining the fixed tensor shape."""
@@ -167,6 +185,9 @@ class ConfigurableSpectralModel(pl.LightningModule):
             rho = x[..., 3] * torch.exp(torch.randn_like(x[..., 3]) * self.density_noise)
             x = torch.cat([x[..., :3], rho.unsqueeze(-1)], dim=-1)
         clean = torch.rand(x.shape[0], device=x.device) < self.clean_probability
+        if self.spatial_noise > 0:
+            coords_noise = torch.randn_like(x[..., :3]) * self.spatial_noise
+            x = torch.cat([x[..., :3] + coords_noise, x[..., 3:]], dim=-1)
         return torch.where(clean[:, None, None], original, x)
 
     def training_step(self, batch, batch_idx):
@@ -179,7 +200,7 @@ class ConfigurableSpectralModel(pl.LightningModule):
             if self.glob_noise > 0:
                 global_batch = global_batch + self.glob_noise * torch.randn_like(global_batch)
         logits = self(augmented, global_values=global_batch).float()
-        loss = torch.nn.functional.cross_entropy(logits, y, label_smoothing=self.label_smoothing)
+        loss = self.loss_fn(logits, y)
         self.log("train_loss", loss, on_step=False, on_epoch=True, batch_size=x.size(0))
         self.log("train_acc", (logits.argmax(1) == y).float().mean(), on_step=False, on_epoch=True,
                  batch_size=x.size(0))
@@ -193,10 +214,14 @@ class ConfigurableSpectralModel(pl.LightningModule):
             global_batch = global_batch[:, self.global_columns]
         logits = self(x, global_values=global_batch).float()
         metrics = compute_metrics(logits, y, self.num_classes)
+        loss = self.loss_fn(logits, y)
         recall.update(logits.argmax(1), y)
         for name, value in metrics.items():
+            if name == "loss":
+                continue
             self.log(f"{prefix}_{name}", value, on_step=False, on_epoch=True, batch_size=x.size(0))
-        return metrics["loss"]
+        self.log(f"{prefix}_loss", loss, on_step=False, on_epoch=True, batch_size=x.size(0))
+        return loss
 
     def validation_step(self, batch, batch_idx):
         return self._eval_step(batch, "val", self.val_recall)
