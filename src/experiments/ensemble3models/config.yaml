@@ -1,0 +1,74 @@
+wandb:
+  project: ligand-identification-ensembles
+  experiment: experiment-2
+
+# Leave unset for a unique UTC timestamp, or set this to reuse the run in train_head.
+run_id: null
+
+# Selected loss for all three backbones and the stacked tuning head.
+loss:
+  name: baseline
+  label_smoothing: 0.1
+
+ensemble:
+  name: experiment-1-stacked-head
+  data_path: /home/abielska/ligand-identification/data/unthresholded_transform_probabilistic
+  epochs: 50
+  # Early-stopping patience starts counting at unfreeze_epoch.
+  patience: 10
+  unfreeze_epoch: 10
+  learning_rate: 0.001
+  backbone_lr_scale: 0.1
+  weight_decay: 0.00005
+  feature_noise: 0.5
+  loss: ${loss}
+
+# models:
+#   - name: model1
+#     lmax: 6
+#     data_path: /home/abielska/ligand-identification/data/unthresholded_transform_probabilistic
+#   - name: model2
+#     lmax: 6
+#     data_path: /home/abielska/ligand-identification/data/unthresholded_transform_probabilistic
+#   - name: model3
+#     lmax: 6
+#     data_path: /home/abielska/ligand-identification/data/unthresholded_transform_probabilistic
+
+#experimet 2
+# three models with different lmax and different datasets
+models:
+  - name: model1
+    lmax: 4
+    data_path: /home/abielska/ligand-identification/data/unthresholded_500_transform_probabilistic
+  - name: model2
+    lmax: 4
+    data_path: /home/abielska/ligand-identification/data/unthresholded_1000_transform_probabilistic
+  - name: model3
+    lmax: 6
+    data_path: /home/abielska/ligand-identification/data/unthresholded_transform_probabilistic
+# experiment 3
+# three models with different number of sample points
+
+# models:
+#   - name: model1
+#     lmax: 6
+#     data_path: /home/abielska/ligand-identification/data/unthresholded_500_transform_probabilistic
+#   - name: model2
+#     lmax: 6
+#     data_path: /home/abielska/ligand-identification/data/unthresholded_1000_transform_probabilistic
+#   - name: model3
+#     lmax: 6
+#     data_path: /home/abielska/ligand-identification/data/unthresholded_transform_probabilistic
+
+# experiment 4
+# three models with different number different lmax
+
+#   - name: model1
+#     lmax: 2
+#     data_path: /home/abielska/ligand-identification/data/unthresholded_transform_probabilistic
+#   - name: model2
+#     lmax: 4
+#     data_path: /home/abielska/ligand-identification/data/unthresholded_transform_probabilistic
+#   - name: model3
+#     lmax: 6
+#     data_path: /home/abielska/ligand-identification/data/unthresholded_transform_probabilistic
