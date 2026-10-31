@@ -3,10 +3,13 @@ defaults:
   - machine: hpc
   - _self_
 
+data:
+  max_points: 2000
+  
 train:
   epochs: 15
   learning_rate: 3e-3
-  out_channels: 97
+  out_channels: 91
   normalize_data: true
   weight_decay: 5e-2
   gradient_clip_val: null

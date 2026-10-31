@@ -170,15 +170,16 @@ def preprocess(
     file_labels: List[str],
     output_path: Path,
     transform_stack: str = "probabilistic",
+    max_points: int = 2000,
 ) -> None:
     if transform_stack == "uniform":
-        transforms = [UniformSelectionTransform(max_blob_size=2000, method="max")]
+        transforms = [UniformSelectionTransform(max_blob_size=max_points, method="max")]
     elif transform_stack == "probabilistic":
-        transforms = [ProbabilisticSelectionTransform(max_blob_size=2000)]
+        transforms = [ProbabilisticSelectionTransform(max_blob_size=max_points)]
     elif transform_stack == "normalization":
         transforms = [
             SpatialNormalization3(),
-            ProbabilisticSelectionTransform(max_blob_size=2000),
+            ProbabilisticSelectionTransform(max_blob_size=max_points),
         ]
     else:
         raise ValueError(f"Unknown transform stack: {transform_stack}")
@@ -232,6 +233,11 @@ if __name__ == "__main__":
         help="Transform stack to apply during preprocessing.",
     )
     parser.add_argument(
+        "--max-points", 
+        type=int, 
+        default=2000,
+        help="Maximum number of points kept per blob.")
+    parser.add_argument(
         "--output-folder",
         type=str,
         required=True,
@@ -251,7 +257,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    output_folder = Path(args.output_folder + f"_transform_{args.transform_stack}")
+    output_folder = Path(args.output_folder + f"_transform_{args.transform_stack}_{args.max_points}pts")
     output_folder.mkdir(parents=True, exist_ok=True)
     
     # Run get_frequent_groups.sh and filter_cryoem_classes.sh
@@ -302,20 +308,24 @@ if __name__ == "__main__":
                 preprocess, sublist, sublabels,
                 output_folder / "train",
                 transform_stack=args.transform_stack,
+                max_points=args.max_points,
             ))
         for sublist, sublabels in chunk(val_files, val_labels, args.chunk_size):
             futures.append(pool.submit(
                 preprocess, sublist, sublabels,
                 output_folder / "val",
                 transform_stack=args.transform_stack,
+                max_points=args.max_points,
             ))
         for sublist, sublabels in chunk(test_files, test_labels, args.chunk_size):
             futures.append(pool.submit(
                 preprocess, sublist, sublabels,
                 output_folder / "test",
                 transform_stack=args.transform_stack,
+                max_points=args.max_points,
             ))            
-    wait(futures)
+    for f in as_completed(futures):
+        f.result()
     
     # Remove filtered_data_dir and ligand_groups.txt
     if filtered_data_dir.exists():

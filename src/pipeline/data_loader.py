@@ -2,7 +2,7 @@
 
 import math
 from pathlib import Path
-
+from functools import partial
 import numpy as np
 import torch
 from omegaconf import DictConfig
@@ -15,27 +15,26 @@ from src.pipeline.global_statistics import complete_input_statistics
 MAX_POINTS = 2000
 
 
-def transform_clifford(npz):
+def transform_clifford(npz, max_points: int = MAX_POINTS):
     """Prepare coordinate-only input with shape ``(3, max_points)``."""
     indices = npz["indices"].astype(np.float32)
-    if indices.shape[0] > MAX_POINTS:
-        raise ValueError(f"Clifford input contains {indices.shape[0]} points; maximum is {MAX_POINTS}.")
-    points = np.zeros((MAX_POINTS, 3), dtype=np.float32)
+    if indices.shape[0] > max_points:
+        raise ValueError(f"Clifford input contains {indices.shape[0]} points; maximum is {max_points}.")
+    points = np.zeros((max_points, 3), dtype=np.float32)
     points[: indices.shape[0], :3] = indices
     return torch.from_numpy(points.transpose(1, 0))
 
 
-def transform_e3nn(npz):
+def transform_e3nn(npz, max_points: int = MAX_POINTS):
     """Prepare coordinate and density input with shape ``(max_points, 4)``."""
     coords = npz["indices"].astype(np.float32)
-    if coords.shape[0] > MAX_POINTS:
-        raise ValueError(f"e3nn input contains {coords.shape[0]} points; maximum is {MAX_POINTS}.")
+    if coords.shape[0] > max_points:
+        raise ValueError(f"e3nn input contains {coords.shape[0]} points; maximum is {max_points}.")
     density = np.maximum(npz["values"].astype(np.float32), 0)
-    points = np.zeros((MAX_POINTS, 4), dtype=np.float32)
+    points = np.zeros((max_points, 4), dtype=np.float32)
     points[: coords.shape[0], :3] = coords
     points[: coords.shape[0], 3] = density
     return torch.from_numpy(points)
-
 
 class GPULoader:
     """Keep a split on the selected device when memory permits."""
@@ -119,16 +118,16 @@ def validate_data_dir(data_dir: Path):
 
 def build_data(cfg: DictConfig, model_type: str):
     """Build train, validation, and test loaders for a configured model."""
+    max_points = cfg.data.max_points
     match model_type:
         case "clifford":
-            transform = transform_clifford
+            transform = partial(transform_clifford, max_points=max_points)
             global_transform = None
         case "spectral":
-            transform = transform_e3nn
+            transform = partial(transform_e3nn, max_points=max_points)
             global_transform = complete_input_statistics
         case _:
-            raise ValueError(f"Unknown model type: {model_type}")
-        
+            raise ValueError(f"Unknown model type: {model_type}")   
     data_dir = Path(cfg.paths.data_dir)
     splits = ("train", "val", "test")
     classes = sorted(
