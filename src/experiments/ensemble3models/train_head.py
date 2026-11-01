@@ -12,8 +12,8 @@ from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 
-from src.experiments.train_3_models import build_config
-from src.experiments.ensemble3models.losses import build_loss
+from src.experiments.ensemble3models.train_3_models import build_config
+from src.utils.losses import build_loss
 from src.models.e3nn.ensemble import best_ckpt, load_model
 from src.models.e3nn.configurable_spectral import ConfigurableSpectralModel
 from src.pipeline.data_loader import build_data, validate_data_dir

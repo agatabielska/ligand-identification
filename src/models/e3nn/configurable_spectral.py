@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torchmetrics
 
-from src.experiments.ensemble3models.losses import build_loss
+from src.utils.losses import build_loss
 from src.models.e3nn.features import sh_coefficients
 from src.models.e3nn.spectral_net import SpectralNet
 from src.utils.metrics import compute_metrics

@@ -25,3 +25,10 @@
 
 
 uv run -m src.scripts.train paths.data_dir=data/unthresholded_transform_probabilistic model=spectral wandb.run_name=UP_SOTA
+
+# loss experiments
+# uv run -m src.experiments.loss_experiments.e3nn_loss_experiments
+
+# build e3nn model with ensemble of 3 models
+# uv run -m src.experiments.ensemble3models.train_3_models
+# uv run -m src.experiments.ensemble3models.train_head

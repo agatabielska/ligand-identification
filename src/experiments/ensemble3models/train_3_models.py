@@ -8,7 +8,7 @@ from src.scripts.train import run_training
 from src.utils.set_seed import set_seed
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CONFIG = ROOT / "configs" / "config.yaml"
 MODEL_CONFIG = ROOT / "configs" / "model" / "spectral.yaml"
 MACHINE_CONFIG = ROOT / "configs" / "machine" / "hpc.yaml"
@@ -51,7 +51,7 @@ def build_config(model_override: DictConfig) -> DictConfig:
     return OmegaConf.merge(cfg, {"model": model_values, "wandb": {"tags": tags}})
 
 
-@hydra.main(config_path="ensemble3models", config_name="config", version_base=None)
+@hydra.main(config_path=".", config_name="config", version_base=None)
 def main(experiment_cfg: DictConfig) -> None:
     run_id = experiment_cfg.get("run_id") or datetime.now(timezone.utc).strftime(
         "%Y%m%d-%H%M%S-%f"

@@ -615,7 +615,7 @@ def run_default_from_config(cfg, globals_mode="points_2000", output_dir=None):
         "wd": model.weight_decay,
         "epochs": train.epochs,
         "bs": cfg.machine.batch_size,
-        "label_smoothing": model.label_smoothing,
+        "label_smoothing": float(train.loss.get("label_smoothing", 0.05)),
         "glob": model.use_globals,
         "glob_noise": model.glob_noise,
     }

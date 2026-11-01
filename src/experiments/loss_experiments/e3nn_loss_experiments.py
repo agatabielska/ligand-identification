@@ -6,7 +6,7 @@ from pathlib import Path
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-from src.experiments.ensemble3models.losses import DEFINED_LOSSES
+from src.utils.losses import DEFINED_LOSSES
 from src.pipeline.data_loader import build_data, validate_data_dir
 from src.scripts.train import run_training
 from src.utils.set_seed import set_seed
@@ -23,7 +23,7 @@ def format_loss_run_name(run_id: str, loss_cfg: dict) -> str:
     return "-".join([run_id, loss_name, *parameters])
 
 
-@hydra.main(config_path="../../configs", config_name="config", version_base=None)
+@hydra.main(config_path="../../../configs", config_name="config", version_base=None)
 def main(cfg: DictConfig) -> None:
     run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     validate_data_dir(Path(cfg.paths.data_dir))
