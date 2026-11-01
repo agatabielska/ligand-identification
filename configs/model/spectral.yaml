@@ -13,6 +13,7 @@ bispec_mode: batched
 norm: layer
 in_bn: false
 use_globals: all
+spatial_noise: 0.0 #new argument to check noise augmentation optionally if set to more than 0.0
 glob_dim: 64
 glob_noise: 0.0
 widths: [512, 256]

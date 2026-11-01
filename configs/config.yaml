@@ -4,14 +4,14 @@ defaults:
   - _self_
 
 train:
-  epochs: 15
+  epochs: 50
   learning_rate: 3e-3
-  out_channels: 97
+  out_channels: 91
   normalize_data: true
   weight_decay: 5e-2
   gradient_clip_val: null
   early_stopping:
-    patience: 15
+    patience: 3
     mode: min
     monitor: val_loss
 
