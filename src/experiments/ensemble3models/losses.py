@@ -66,7 +66,7 @@ def build_loss(
 ) -> nn.Module:
     """Build a loss while keeping class statistics derived from the train split."""
     name = str((loss_cfg or {}).get("name", "baseline"))
-    if name == "baseline":
+    if name == "baseline" or name == "cross-entropy":
         return nn.CrossEntropyLoss(
             label_smoothing=float((loss_cfg or {}).get("label_smoothing", 0.05))
         )
