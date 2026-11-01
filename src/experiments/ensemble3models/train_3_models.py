@@ -1,10 +1,10 @@
-from datetime import datetime, timezone
 from pathlib import Path
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
 from src.scripts.train import run_training
+from src.utils.experiment_cli import parse_experiment_args
 from src.utils.set_seed import set_seed
 
 
@@ -13,6 +13,27 @@ DEFAULT_CONFIG = ROOT / "configs" / "config.yaml"
 MODEL_CONFIG = ROOT / "configs" / "model" / "spectral.yaml"
 MACHINE_CONFIG = ROOT / "configs" / "machine" / "hpc.yaml"
 EXPERIMENT_CONFIG = Path(__file__).with_name("config.yaml")
+EXPERIMENT_ARGS = parse_experiment_args()
+
+
+def select_experiment(
+    experiment_cfg: DictConfig, experiment_number: str, run_id: str | None = None
+) -> DictConfig:
+    """Select a named ensemble definition and attach its reproducible run ID."""
+    if not experiment_number:
+        raise ValueError("Provide --experiment-number, for example experiment1.")
+    experiments = experiment_cfg.get("experiments", {})
+    if experiment_number not in experiments:
+        available = ", ".join(experiments.keys())
+        raise ValueError(
+            f"Unknown experiment {experiment_number!r}; expected one of: {available}"
+        )
+    selected = OmegaConf.create(OmegaConf.to_container(experiment_cfg, resolve=False))
+    selected.pop("experiments")
+    selected = OmegaConf.merge(selected, experiments[experiment_number])
+    selected.experiment_number = experiment_number
+    selected.run_id = run_id or selected.get("run_id") or experiment_number
+    return selected
 
 
 def build_config(model_override: DictConfig) -> DictConfig:
@@ -53,9 +74,10 @@ def build_config(model_override: DictConfig) -> DictConfig:
 
 @hydra.main(config_path=".", config_name="config", version_base=None)
 def main(experiment_cfg: DictConfig) -> None:
-    run_id = experiment_cfg.get("run_id") or datetime.now(timezone.utc).strftime(
-        "%Y%m%d-%H%M%S-%f"
+    experiment_cfg = select_experiment(
+        experiment_cfg, EXPERIMENT_ARGS.experiment_number, EXPERIMENT_ARGS.run_id
     )
+    run_id = experiment_cfg.run_id
     print(f"Training ensemble run: {run_id}")
     for model_cfg in experiment_cfg.models:
         cfg = build_config(model_cfg)

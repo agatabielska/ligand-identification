@@ -12,7 +12,11 @@ from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 
-from src.experiments.ensemble3models.train_3_models import build_config
+from src.experiments.ensemble3models.train_3_models import (
+    EXPERIMENT_ARGS,
+    build_config,
+    select_experiment,
+)
 from src.utils.losses import build_loss
 from src.models.e3nn.ensemble import best_ckpt, load_model
 from src.models.e3nn.configurable_spectral import ConfigurableSpectralModel
@@ -202,10 +206,12 @@ class StackedHead(pl.LightningModule):
 
 
 def run_training(experiment_cfg: DictConfig):
+    if "experiments" in experiment_cfg:
+        experiment_cfg = select_experiment(
+            experiment_cfg, EXPERIMENT_ARGS.experiment_number, EXPERIMENT_ARGS.run_id
+        )
     ensemble_cfg = experiment_cfg.ensemble
-    run_id = experiment_cfg.get("run_id") or datetime.now(timezone.utc).strftime(
-        "%Y%m%d-%H%M%S-%f"
-    )
+    run_id = experiment_cfg.run_id
     if len(experiment_cfg.models) != 3:
         raise ValueError("Expected exactly three backbone models.")
 

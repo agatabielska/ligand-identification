@@ -30,5 +30,5 @@ uv run -m src.scripts.train paths.data_dir=data/unthresholded_transform_probabil
 # uv run -m src.experiments.loss_experiments.e3nn_loss_experiments
 
 # build e3nn model with ensemble of 3 models
-# uv run -m src.experiments.ensemble3models.train_3_models
-# uv run -m src.experiments.ensemble3models.train_head
+# uv run -m src.experiments.ensemble3models.train_3_models --experiment-number experiment1 --run-id experiment1-run1
+# uv run -m src.experiments.ensemble3models.train_head --experiment-number experiment1 --run-id experiment1-run1
