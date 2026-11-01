@@ -39,7 +39,6 @@ class ConfigurableSpectralModel(pl.LightningModule):
         gram: str = "none",
         triples: str = "nonzero",
         bispec_lmax: int = 6,
-        bispec_mode: str = "batched",
         reflection_equivariant: bool = True,
         norm: str = "batch",
         in_bn: bool = False,
@@ -85,7 +84,6 @@ class ConfigurableSpectralModel(pl.LightningModule):
         self.register_buffer("global_std", torch.ones(12))
 
         self.net = SpectralNet(
-            num_classes=num_classes,
             n_shells=n_shells,
             lmax=lmax,
             r_max=r_max,
@@ -98,7 +96,6 @@ class ConfigurableSpectralModel(pl.LightningModule):
             norm=norm,
             in_bn=in_bn,
             mix_bn=mix_bn,
-            bispec_mode=bispec_mode,
             reflection_equivariant=reflection_equivariant,
         )
 

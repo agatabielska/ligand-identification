@@ -90,14 +90,14 @@ class BigNet(SpectralNet):
 # NET0 = best small-scale config (v3_ls05): 4 shells, 2 channels, no Gram, n_mix 16, no dead triples,
 # 2 hidden layers (512, 256), per-sample LayerNorm on features, lr 3e-3, label smoothing 0.05.
 NET0 = dict(n_mix=16, gram="none", triples="nonzero", n_channels=2, in_bn=False, feat_dropout=0.0,
-            bispec_mode="batched", widths=(512, 256), head_dropout=0.2, norm="layer")
+            widths=(512, 256), head_dropout=0.2, norm="layer")
 
 
 def P(cache="feats4.pt", net=None, **train):
     return dict(cache=cache, net={**NET0, **(net or {})}, train=train)
 
 
-SP = dict(bispec_mode="sparse")  # batched pads to (2L+1)^2 per triple: too much memory above lmax 8
+SP = dict()  # batched pads to (2L+1)^2 per triple: too much memory above lmax 8
 PRESETS = {
     # reference: the old default, WITHOUT size scalars
     "b0":        P(glob="none"),
@@ -603,7 +603,6 @@ def run_default_from_config(cfg, globals_mode="points_2000", output_dir=None):
         "gram": model.gram,
         "triples": model.triples,
         "bispec_lmax": model.bispec_lmax,
-        "bispec_mode": model.bispec_mode,
         "norm": model.norm,
         "in_bn": model.in_bn,
         "widths": tuple(model.widths),
