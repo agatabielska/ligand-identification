@@ -25,7 +25,7 @@ Every simplification candidate is a constructor switch so one class covers the w
 import torch
 import torch.nn as nn
 from e3nn.nn import BatchNorm
-from e3nn.o3 import Irreps, Linear, wigner_3j, TensorProduct
+from e3nn.o3 import Irreps, Linear, wigner_3j
 
 
 def build_degree_irreps(multiplicity: int, first_degree: int, last_degree: int, reflection_equivariant: bool) -> Irreps:
@@ -104,30 +104,6 @@ class SpectralNet(nn.Module):
         self.register_buffer("tA", t[:, 0].clone())
         self.register_buffer("tB", t[:, 1].clone())
         self.register_buffer("tC", t[:, 2].clone())
-
-        if self.triples:
-            base = -1 if reflection_equivariant else 1
-            irreps_h = build_degree_irreps(self.m, 0, self.bl, reflection_equivariant)
-            # one output block per triple: m channels of irrep l_c with parity p_a * p_b
-            irreps_tp_out = Irreps([(self.m, (c, base ** (a + b))) for a, b, c in self.triples])
-            instructions = [(a, b, i, "uuu", False) for i, (a, b, c) in enumerate(self.triples)]
-            self.tp = TensorProduct(
-                irreps_h, irreps_h, irreps_tp_out, instructions,
-                irrep_normalization="none", path_normalization="none",
-            )
-
-            # step 2 (dot with t_c over the 2c+1 axis) as one gather + one index_add_
-            gu, gp, seg = [], [], []
-            for i, (a, b, c) in enumerate(self.triples):
-                for u in range(self.m):
-                    for p in range(2 * c + 1):
-                        gu.append(u)
-                        gp.append(c * c + p)  # position of (c, p) in cat(ts, -1)
-                        seg.append(i * self.m + u)
-            self.register_buffer("gu", torch.tensor(gu, dtype=torch.long))
-            self.register_buffer("gp", torch.tensor(gp, dtype=torch.long))
-            self.register_buffer("gseg", torch.tensor(seg, dtype=torch.long))
-
         self.register_buffer("iu_m", torch.triu_indices(self.m, self.m))
         self.register_buffer("iu_k", torch.triu_indices(K, K))
 
@@ -167,13 +143,14 @@ class SpectralNet(nn.Module):
         return [torch.cat(parts, -1)]
     
     def _bispec(self, ts):
-        ts = ts[: self.bl + 1]
-        h = torch.cat([t.flatten(1) for t in ts], -1)   # e3nn layout: per degree, (m, 2l+1) flattened
-        z = self.tp(h, h)                               # (B, sum_i m*(2c_i+1)); z[i] = sum_mn w3j[m,n,:] t_a[m] t_b[n]
-        T = torch.cat(ts, -1)                           # (B, m, (bl+1)^2)
-        prod = z * T[:, self.gu, self.gp]               # pair each z component with t_c's matching component
-        out = prod.new_zeros(z.shape[0], len(self.triples) * self.m).index_add_(1, self.gseg, prod)
-        return [out]                                    # triple-major, channel-minor
+        B, D = ts[0].shape[0], 2 * self.bl + 1
+        T = ts[0].new_zeros(B, self.m, self.bl + 1, D)
+        for l in range(self.bl + 1):
+            T[:, :, l, : 2 * l + 1] = ts[l]
+        Ta, Tb, Tc = T[:, :, self.tA], T[:, :, self.tB], T[:, :, self.tC]   # (B, m, P, D)
+        z = torch.einsum("pmnq,bupq->bupmn", self.w3j_pad, Tc)
+        out = (z * Ta.unsqueeze(-1) * Tb.unsqueeze(-2)).sum((-1, -2))       # (B, m, P)
+        return [out.permute(0, 2, 1).flatten(1)]                            # triple-major, channel-minor
 
     def features(self, c):
         """c: (B, K*C, (lmax+1)^2) -> (B, d_in) invariant features (signed-log).
