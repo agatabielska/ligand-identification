@@ -171,15 +171,16 @@ def preprocess(
     output_path: Path,
     number_of_datapoints: int = 2000,
     transform_stack: str = "probabilistic",
+    max_points: int = 2000,
 ) -> None:
     if transform_stack == "uniform":
-        transforms = [UniformSelectionTransform(max_blob_size=number_of_datapoints, method="max")]
+        transforms = [UniformSelectionTransform(max_blob_size=max_points, method="max")]
     elif transform_stack == "probabilistic":
-        transforms = [ProbabilisticSelectionTransform(max_blob_size=number_of_datapoints)]
+        transforms = [ProbabilisticSelectionTransform(max_blob_size=max_points)]
     elif transform_stack == "normalization":
         transforms = [
             SpatialNormalization3(),
-            ProbabilisticSelectionTransform(max_blob_size=number_of_datapoints),
+            ProbabilisticSelectionTransform(max_blob_size=max_points),
         ]
     else:
         raise ValueError(f"Unknown transform stack: {transform_stack}")
@@ -233,11 +234,10 @@ if __name__ == "__main__":
         help="Transform stack to apply during preprocessing.",
     )
     parser.add_argument(
-        "--number-of-datapoints",
-        type=int,
+        "--max-points", 
+        type=int, 
         default=2000,
-        help="Number of datapoints to select from each blob during preprocessing.",
-    )
+        help="Maximum number of points kept per blob.")
     parser.add_argument(
         "--output-folder",
         type=str,
@@ -264,7 +264,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    output_folder = Path(args.output_folder + f"_transform_{args.transform_stack}")
+    output_folder = Path(args.output_folder + f"_transform_{args.transform_stack}_{args.max_points}pts")
     output_folder.mkdir(parents=True, exist_ok=True)
     
     # Run get_frequent_groups.sh and filter_cryoem_classes.sh
@@ -325,6 +325,7 @@ if __name__ == "__main__":
                 output_folder / "train",
                 number_of_datapoints=args.number_of_datapoints,
                 transform_stack=args.transform_stack,
+                max_points=args.max_points,
             ))
         for sublist, sublabels in chunk(val_files, val_labels, args.chunk_size):
             futures.append(pool.submit(
@@ -332,6 +333,7 @@ if __name__ == "__main__":
                 output_folder / "val",
                 number_of_datapoints=args.number_of_datapoints,
                 transform_stack=args.transform_stack,
+                max_points=args.max_points,
             ))
         for sublist, sublabels in chunk(test_files, test_labels, args.chunk_size):
             futures.append(pool.submit(
@@ -339,8 +341,10 @@ if __name__ == "__main__":
                 output_folder / "test",
                 number_of_datapoints=args.number_of_datapoints,
                 transform_stack=args.transform_stack,
+                max_points=args.max_points,
             ))            
-    wait(futures)
+    for f in as_completed(futures):
+        f.result()
     
     # Remove filtered_data_dir and ligand_groups.txt
     if filtered_data_dir.exists():

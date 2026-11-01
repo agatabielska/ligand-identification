@@ -20,21 +20,21 @@ def trim_padding(x: torch.Tensor) -> torch.Tensor:
     return x[:, : max(n, 1)]
 
 
-def _chunk(x, lmax, centers, width, n_channels):
-    pts, rho = x[..., :3], x[..., 3]
-    rho = rho.clamp_min(0)
-    valid = (rho > 0).to(rho.dtype)
-    chans = torch.stack([rho, valid, rho * rho], dim=-1)[..., :n_channels]  # (B, N, C)
-    chans = chans / chans.sum(1, keepdim=True).clamp(min=1e-8)
+def _extract_sh_features(x, lmax, centers, width, n_channels):
+    coords, density = x[..., :3], x[..., 3]
+    density = density.clamp_min(0)
+    valid = (density > 0).to(density.dtype)
+    channels = torch.stack([density, valid, density * density], dim=-1)[..., :n_channels]  # (B, N, C)
+    channels = channels / channels.sum(1, keepdim=True).clamp(min=1e-8)
 
-    com = (pts * chans[..., :1]).sum(1, keepdim=True)  # density-weighted centre of mass
-    d = pts - com
-    r = d.norm(dim=-1)
+    density_weighted_centre = (coords * channels[..., :1]).sum(1, keepdim=True)
+    distances_from_center = coords - density_weighted_centre
+    radius = distances_from_center.norm(dim=-1)
 
-    Y = spherical_harmonics(list(range(lmax + 1)), d, normalize=True, normalization="integral")
-    g = torch.exp(-(((r[..., None] - centers) / width) ** 2))  # (B, N, K)
-    gw = (g[..., :, None] * chans[..., None, :]).flatten(2)  # (B, N, K*C)
-    return torch.einsum("bnj,bnm->bjm", gw, Y)  # (B, K*C, M)
+    harmonics = spherical_harmonics(list(range(lmax + 1)), distances_from_center, normalize=True, normalization="integral")
+    gaus_weights = torch.exp(-(((radius[..., None] - centers) / width) ** 2))  # (B, N, K)
+    weighted_channels = (gaus_weights[..., :, None] * channels[..., None, :]).flatten(2)  # (B, N, K*C)
+    return torch.einsum("bnj,bnm->bjm", weighted_channels, harmonics)  # (B, K*C, M)
 
 
 @torch.no_grad()
@@ -46,5 +46,5 @@ def sh_coefficients(x, lmax=6, n_shells=16, r_max=1.0, n_channels=3, chunk=1024,
     for xc in x.split(chunk):
         if trim:
             xc = trim_padding(xc)
-        outs.append(_chunk(xc, lmax, centers, width, n_channels))
+        outs.append(_extract_sh_features(xc, lmax, centers, width, n_channels))
     return torch.cat(outs)

@@ -21,8 +21,8 @@ def point_statistics(x: torch.Tensor, batch_size: int = 1024) -> torch.Tensor:
         covariance += 1e-8 * torch.eye(3, device=batch.device, dtype=batch.dtype)
         eigenvalues = torch.linalg.eigvalsh(covariance).clamp_min(0).sqrt()
         valid_points = valid.unsqueeze(-1)
-        mins = points.masked_fill(~valid_points, 0).amin(1)
-        maxs = points.masked_fill(~valid_points, 0).amax(1)
+        mins = points.masked_fill(~valid_points, float("inf")).amin(1)
+        maxs = points.masked_fill(~valid_points, float("-inf")).amax(1)
         bounds = (maxs - mins).sort(dim=1).values
         counts = torch.stack(
             (torch.log1p(total), torch.log1p(density.amax(1))),
@@ -41,7 +41,7 @@ def point_statistics(x: torch.Tensor, batch_size: int = 1024) -> torch.Tensor:
 
 
 def complete_input_statistics(npz) -> torch.Tensor:
-    """Compute 12 scalar features from all entries in one sparse input blob."""
+    """Compute 11 scalar features from all entries in one sparse input blob."""
     coordinates = npz["indices"].astype(np.float64)
     density = np.maximum(npz["values"].astype(np.float64), 0)
     total = density.sum()

@@ -90,7 +90,6 @@ The default invariant settings are:
 pow_mode     = triu
 triples      = nonzero
 bispec_lmax  = 6
-bispec_mode  = batched
 gram         = none
 ```
 

@@ -3,3 +3,5 @@ num_workers: 64
 cache_dataset: true
 pin_memory: true
 devices: 1
+# Turn off if you get OOM errors, but this will slow down training
+use_gpu_loader: true

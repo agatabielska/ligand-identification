@@ -21,9 +21,6 @@ Every simplification candidate is a constructor switch so one class covers the w
   norm             "layer" (original LayerNorm over features) | "batch" (per-feature standardisation)
   in_bn/mix_bn     the two e3nn BatchNorms around the mix
   n_hidden         0 = linear probe, 1 = one hidden layer, 2 = original (hidden -> hidden//2)
-  bispec_mode      "loop" (original, one small einsum per triple)
-                   | "batched" (one padded contraction)
-                   | "sparse" (one gather + one index_add_ over the nonzero 3j entries)
 """
 import torch
 import torch.nn as nn
@@ -31,10 +28,11 @@ from e3nn.nn import BatchNorm
 from e3nn.o3 import Irreps, Linear, wigner_3j
 
 
-def build_degree_irreps(multiplicity: int, first_degree: int, last_degree: int) -> Irreps:
+def build_degree_irreps(multiplicity: int, first_degree: int, last_degree: int, reflection_equivariant: bool) -> Irreps:
     """Build one irrep block for each angular degree in an inclusive range."""
     l_from, l_to = first_degree, last_degree
-    return Irreps([(multiplicity, (l, (-1) ** l)) for l in range(l_from, l_to + 1)])
+    base = -1 if reflection_equivariant else 1
+    return Irreps([(multiplicity, (l, base ** l)) for l in range(l_from, l_to + 1)])
 
 
 def slog(f: torch.Tensor) -> torch.Tensor:
@@ -54,7 +52,6 @@ def is_valid_bispectrum_triple(first: int, second: int, third: int, mode: str) -
 class SpectralNet(nn.Module):
     def __init__(
         self,
-        num_classes: int,
         n_shells: int = 16,
         lmax: int = 6,
         r_max: float = 1.0,
@@ -68,22 +65,22 @@ class SpectralNet(nn.Module):
         norm: str = "layer",
         in_bn: bool = True,
         mix_bn: bool = True,
-        bispec_mode: str = "loop",
+        reflection_equivariant: bool = True,
     ):
         super().__init__()
         assert gram in ("none", "density_full", "density", "all")
-        assert norm in ("layer", "batch") and bispec_mode in ("loop", "batched", "sparse")
+        assert norm in ("layer", "batch")
         assert triples in ("all", "nonzero", "even") and pow_mode in ("triu", "diag", "none")
         K, C = n_shells, n_channels
         self.K, self.C, self.lmax, self.r_max = K, C, lmax, r_max
         self.bl = min(bispec_lmax, lmax)
-        self.gram, self.bispec_mode, self.pow_mode = gram, bispec_mode, pow_mode
+        self.gram, self.pow_mode = gram, pow_mode
         self.m = n_mix if n_mix > 0 else K * C  # channels per degree after the (optional) mix
 
-        irreps_in = build_degree_irreps(K * C, 0, lmax)
+        irreps_in = build_degree_irreps(K * C, 0, lmax, reflection_equivariant)
         self.in_bn = BatchNorm(irreps_in) if in_bn else nn.Identity()
         if n_mix > 0:
-            irreps_mix = build_degree_irreps(n_mix, 0, lmax)
+            irreps_mix = build_degree_irreps(n_mix, 0, lmax, reflection_equivariant)
             self.mix = Linear(irreps_in, irreps_mix)
             self.mix_bn = BatchNorm(irreps_mix) if mix_bn else nn.Identity()
         else:
@@ -107,23 +104,6 @@ class SpectralNet(nn.Module):
         self.register_buffer("tA", t[:, 0].clone())
         self.register_buffer("tB", t[:, 1].clone())
         self.register_buffer("tC", t[:, 2].clone())
-
-        if bispec_mode == "sparse":
-            ia, ib, ic, wv, tid = [], [], [], [], []
-            for i, (a, b, c) in enumerate(self.triples):
-                w3 = wigner_3j(a, b, c).float()
-                for mm, nn_, pp in (w3.abs() > 1e-9).nonzero().tolist():
-                    ia.append(a * a + mm)
-                    ib.append(b * b + nn_)
-                    ic.append(c * c + pp)
-                    wv.append(w3[mm, nn_, pp].item())
-                    tid.append(i)
-            self.register_buffer("sa", torch.tensor(ia, dtype=torch.long))
-            self.register_buffer("sb", torch.tensor(ib, dtype=torch.long))
-            self.register_buffer("sc", torch.tensor(ic, dtype=torch.long))
-            self.register_buffer("st", torch.tensor(tid, dtype=torch.long))
-            self.register_buffer("sw", torch.tensor(wv, dtype=torch.float32))
-
         self.register_buffer("iu_m", torch.triu_indices(self.m, self.m))
         self.register_buffer("iu_k", torch.triu_indices(K, K))
 
@@ -161,29 +141,16 @@ class SpectralNet(nn.Module):
                     parts.append(g[:, self.iu_k[0], self.iu_k[1]])
 
         return [torch.cat(parts, -1)]
-
-    def _bispec_loop(self, ts):
-        out = []
-        for i, (a, b, c) in enumerate(self.triples):
-            w = self.w3j_pad[i, : 2 * a + 1, : 2 * b + 1, : 2 * c + 1]
-            out.append(torch.einsum("mnp,bum,bun,bup->bu", w, ts[a], ts[b], ts[c]))
-        return out
-
-    def _bispec_batched(self, ts):
+    
+    def _bispec(self, ts):
         B, D = ts[0].shape[0], 2 * self.bl + 1
         T = ts[0].new_zeros(B, self.m, self.bl + 1, D)
         for l in range(self.bl + 1):
             T[:, :, l, : 2 * l + 1] = ts[l]
-        Ta, Tb, Tc = T[:, :, self.tA], T[:, :, self.tB], T[:, :, self.tC]  # (B, m, P, D)
+        Ta, Tb, Tc = T[:, :, self.tA], T[:, :, self.tB], T[:, :, self.tC]   # (B, m, P, D)
         z = torch.einsum("pmnq,bupq->bupmn", self.w3j_pad, Tc)
-        out = (z * Ta.unsqueeze(-1) * Tb.unsqueeze(-2)).sum((-1, -2))  # (B, m, P)
-        return [out.permute(0, 2, 1).flatten(1)]
-
-    def _bispec_sparse(self, ts):
-        T = torch.cat(ts[: self.bl + 1], -1)  # (B, m, (bl+1)^2), degree l at [l^2, (l+1)^2)
-        prod = T[:, :, self.sa] * T[:, :, self.sb] * T[:, :, self.sc] * self.sw  # (B, m, nnz)
-        out = prod.new_zeros(T.shape[0], self.m, len(self.triples)).index_add_(2, self.st, prod)
-        return [out.permute(0, 2, 1).flatten(1)]  # triple-major, channel-minor (same as loop)
+        out = (z * Ta.unsqueeze(-1) * Tb.unsqueeze(-2)).sum((-1, -2))       # (B, m, P)
+        return [out.permute(0, 2, 1).flatten(1)]                            # triple-major, channel-minor
 
     def features(self, c):
         """c: (B, K*C, (lmax+1)^2) -> (B, d_in) invariant features (signed-log).
@@ -209,12 +176,7 @@ class SpectralNet(nn.Module):
                 parts.append((t * t).sum(-1))
 
         if self.triples:
-            if self.bispec_mode == "loop":
-                parts += self._bispec_loop(ts)
-            elif self.bispec_mode == "batched":
-                parts += self._bispec_batched(ts)
-            else:
-                parts += self._bispec_sparse(ts)
+            parts += self._bispec(ts)
         parts = [p if p.dim() == 2 else p.unsqueeze(-1) for p in parts]
         return slog(torch.cat(parts, -1))
 

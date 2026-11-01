@@ -73,6 +73,34 @@ Check available configuration values:
 uv run -m src.scripts.train --help
 ```
 
+## Point-count experiment
+
+Compares 2k / 4k / 10k / 25k points per blob, with global features
+(`model=spectral`) and without (`model=spectral_no_globals`, which is
+`spectral.yaml` with `use_globals: none`).
+
+```bash
+# 1. preprocess all point counts
+for N in 2000 4000 10000 25000; do
+  uv run -m src.scripts.preprocess --raw-data-dir NoThresholdBlobs \
+    --output-folder data/unthresholded --transform-stack probabilistic --max-points $N
+done
+
+# 2. train (10k+: data kept in CPU RAM; 25k: smaller batch)
+for N in 2000 4000 10000 25000; do
+  for M in spectral spectral_no_globals; do
+    BS=256; GPU=true
+    [ $N -ge 10000 ] && GPU=false
+    [ $N -eq 25000 ] && BS=64
+    uv run -m src.scripts.train model=$M data.max_points=$N \
+      paths.data_dir=data/unthresholded_transform_probabilistic_${N}pts \
+      machine.batch_size=$BS machine.use_gpu_loader=$GPU \
+      wandb.run_name=${M}_${N}pts
+  done
+done
+
+```
+
 ## Run spectral experiments
 
 Run selected strict 2,000-point presets:
