@@ -1,9 +1,14 @@
+import base64
+import json
+
 import streamlit as st
+import streamlit.components.v1 as components
 import numpy as np
-import plotly.graph_objects as go
+from plotly.colors import sequential
 import sys
 from pathlib import Path
 import inspect
+import uuid
 from typing import Any, List
 
 # Ensure src is in sys.path for imports
@@ -20,6 +25,11 @@ from utils.sampling_strategies import (
     PowerTransform,
     TemperatureScaling,
 )
+from visualizations.blob_kind import recognise
+from visualizations.render_blob import auto_sigma, splat_to_grid
+
+PLOT_HEIGHT = 500
+PLOT_TEMPLATE = (Path(__file__).parent / "progressive_plot.html").read_text(encoding="utf-8")
 
 # Registry of available Transform classes for the custom stack editor
 TRANSFORM_CLASSES = {
@@ -60,21 +70,13 @@ def parse_input_value(value: str, expected_type: Any = None):
     return value
 
 
-def instantiate_and_apply_stack(data: np.ndarray, stack: List[dict]) -> np.ndarray:
+def instantiate_and_apply_stack(data: np.ndarray, stack: List[dict]) -> tuple[np.ndarray, list[str], bool]:
     """Given a stack (list of dict with 'class' and 'kwargs'), instantiate each Transform and apply sequentially.
 
     Each item in stack: {'class': 'ClassName', 'kwargs': {'param': value, ...}}
+    Returns (output, notes on skipped transforms, whether a ProbabilisticSelectionTransform subsampled the blob).
     """
-    out = data
-
-    def kwargs_complete(kwargs: dict) -> bool:
-        # Consider kwargs incomplete if any value is an empty string or None.
-        for v in kwargs.values():
-            if v is None:
-                return False
-            if isinstance(v, str) and v.strip() == "":
-                return False
-        return True
+    out, notes, sampled = data, [], False
 
     for item in stack:
         cls_name = item.get("class")
@@ -85,18 +87,23 @@ def instantiate_and_apply_stack(data: np.ndarray, stack: List[dict]) -> np.ndarr
             continue
 
         # Skip transforms with incomplete kwargs (e.g., placeholders like '')
-        if not kwargs_complete(kwargs):
+        missing = [k for k, v in kwargs.items() if v is None or (isinstance(v, str) and not v.strip())]
+        if missing:
+            notes.append(f"{cls_name} skipped: set {', '.join(missing)}")
             continue
 
         try:
             inst = cls(**kwargs)
             if hasattr(inst, "preprocess"):
-                out = inst.preprocess(out)
+                new = inst.preprocess(out)
+                if cls is ProbabilisticSelectionTransform and np.count_nonzero(new) < np.count_nonzero(out):
+                    sampled = True
+                out = new
         except Exception as e:
-            # If instantiation fails, skip the transform but continue pipeline
-            print(f"Failed to instantiate {cls_name} with {kwargs}: {e}")
+            # If a transform fails, skip it but continue the pipeline
+            notes.append(f"{cls_name} failed and was skipped: {e}")
             continue
-    return out
+    return out, notes, sampled
 
 
 # ============================================================================
@@ -104,108 +111,49 @@ def instantiate_and_apply_stack(data: np.ndarray, stack: List[dict]) -> np.ndarr
 # ============================================================================
 
 
-def create_3d_scatter(data: np.ndarray, title: str, data_shape: tuple) -> go.Figure:
-    """Create a 3D scatter plot from probability data with fixed axes"""
-    # Get non-zero probability coordinates
-    x, y, z = np.where(data > 0)
-    probabilities = data[x, y, z]
-
-    probabilities = (probabilities - np.min(probabilities)) / (
-        np.max(probabilities) - np.min(probabilities) + 1e-9
-    )
-
-    # Create scatter plot (even if empty)
-    fig = go.Figure(
-        data=[
-            go.Scatter3d(
-                x=x,
-                y=y,
-                z=z,
-                mode="markers",
-                marker=dict(
-                    size=3,
-                    color=probabilities if len(probabilities) > 0 else [],
-                    colorscale="Viridis",
-                    showscale=True,
-                    colorbar=dict(title="Probability"),
-                    cmin=0,
-                    cmax=1,
-                ),
-                text=[f"Prob: {p:.3f}" for p in probabilities],
-                hovertemplate="<b>Position</b><br>X: %{x}<br>Y: %{y}<br>Z: %{z}<br>%{text}<extra></extra>",
-            )
-        ]
-    )
-
-    if len(x) == 0:
-        fig.add_annotation(
-            text="No data to display",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=14, color="gray"),
-        )
-
-    # Fix axes to original data dimensions
-    fig.update_layout(
-        title=title,
-        scene=dict(
-            xaxis=dict(title="X", range=[0, data_shape[0] - 1]),
-            yaxis=dict(title="Y", range=[0, data_shape[1] - 1]),
-            zaxis=dict(title="Z", range=[0, data_shape[2] - 1]),
-            aspectmode="data",
-        ),
-        height=500,
-        margin=dict(l=0, r=0, t=40, b=0),
-    )
-
-    return fig
+@st.cache_data(max_entries=64, show_spinner=False)
+def apply_stack_cached(blob: np.ndarray, stack: List[dict]) -> tuple[np.ndarray, list[str], bool]:
+    """Cached so reruns triggered by other widgets keep the same (random) samples instead of redrawing them."""
+    return instantiate_and_apply_stack(blob.copy(), stack)
 
 
-def create_intensity_histogram(
-    values: np.ndarray, title: str, nbins: int = 50
-) -> go.Figure:
-    """Create a 1D histogram figure for intensity/probability values.
+def _b64(a: np.ndarray) -> str:
+    return base64.b64encode(np.ascontiguousarray(a).tobytes()).decode()
 
-    Expects a 1D array of values in [0, 1] ideally (normalized upstream). If empty, shows a placeholder.
+
+@st.cache_data(max_entries=64, show_spinner=False)
+def plot_html(data: np.ndarray, title: str, mode: str = "points", filename: str = "plot", weight: str = "values") -> str:
+    """Self-contained three.js page (progressive_plot.html): axes at once, then points stream into GPU buffers.
+
+    Only compact typed arrays go to the browser (uint16 coords, float32 values, uint8 volume grid); spheres and
+    isosurfaces are built client-side. weight="count" for points drawn ∝ density, so volume mode doesn't count it twice.
     """
-    fig = go.Figure()
+    idx = np.argwhere(data > 0)
+    raw = data[tuple(idx.T)]
+    norm = (raw - raw.min()) / (np.ptp(raw) + 1e-9) if len(raw) else raw
+    order = np.random.default_rng(0).permutation(len(idx))  # random arrival order: whole shape appears, then densifies
+    payload: dict[str, Any] = dict(
+        mode=mode, title=title, filename=filename, height=PLOT_HEIGHT, colorscale=sequential.Viridis,
+        shape=list(data.shape), n=len(idx),
+        coords=_b64(idx[order].astype(np.uint16)), values=_b64(norm[order].astype(np.float32)))
+    if mode == "spheres":
+        payload.update(radius=0.6)  # voxels, as in render_blob.spheres_trace
+    elif mode == "volume" and len(idx):
+        coords = idx.astype(float)
+        sigma = auto_sigma(coords)
+        grid, origin = splat_to_grid(coords, raw, sigma, weight)
+        grid = np.rint(255 * grid / (grid.max() or 1.0)).astype(np.uint8)  # 8 bits is plenty for isolevels 0.15-0.6
+        payload.update(grid=_b64(grid), grid_shape=list(grid.shape), origin=origin.tolist())
+    return PLOT_TEMPLATE.replace("__PAYLOAD__", json.dumps(payload))
 
-    if values.size > 0:
-        fig.add_trace(
-            go.Histogram(
-                x=values,
-                nbinsx=nbins,
-                marker=dict(color="#3b82f6"),
-                opacity=0.85,
-                name="Intensity",
-            )
-        )
-        x_min, x_max = float(values.min()), float(values.max())
-    else:
-        # Add an empty trace so axes render consistently
-        fig.add_trace(go.Histogram(x=[]))
-        x_min, x_max = 0.0, 1.0
 
-    fig.update_layout(
-        title=title,
-        xaxis_title="Intensity",
-        yaxis_title="Count",
-        bargap=0.02,
-        height=250,
-        margin=dict(l=0, r=0, t=40, b=0),
-    )
-
-    # Keep x range tight to observed values but within [0,1] when reasonable
-    # This avoids super-wide axes if out-of-range values slip through
-    lo = max(0.0, x_min) if np.isfinite(x_min) else 0.0
-    hi = min(1.0, x_max) if np.isfinite(x_max) else 1.0
-    if lo < hi:
-        fig.update_xaxes(range=[lo, hi])
-
-    return fig
+def show_intensity_histogram(values: np.ndarray, title: str, nbins: int = 50) -> None:
+    """Histogram of intensities normalised to [0, 1]. Streamlit's own bar chart (Vega) instead of st.plotly_chart,
+    which made the page parse a second full plotly.js and delayed the 3D plots by ~1.4 s."""
+    counts, edges = np.histogram(values, bins=nbins, range=(0.0, 1.0))
+    st.caption(title)
+    st.bar_chart({"Intensity": np.round((edges[:-1] + edges[1:]) / 2, 3), "Count": counts},
+                 x="Intensity", y="Count", height=250)
 
 
 # ============================================================================
@@ -215,34 +163,42 @@ def create_intensity_histogram(
 st.set_page_config(layout="wide", page_title="3D Probability Visualizer")
 
 st.title("3D Probability Data Visualizer")
-st.markdown("Upload an NPZ file containing a 'blob' entry with 3D probability data")
+st.markdown("Upload a raw blob (`data/cryoem_blobs`) or a preprocessed file (`data/*_transform_*`); its kind is recognised automatically")
+RENDER_MODES = ["points", "spheres", "volume"]
+RENDER_HELP = "points: flat markers (fastest); spheres: lit sphere per voxel; volume: Gaussian-smoothed isosurfaces"
+
+
+def sync_all_render_modes():
+    for i in range(3):
+        st.session_state[f"render_mode_{i}"] = st.session_state.render_mode_all
+
+
+def update_global_render_mode():
+    # Global switch shows the common mode, or nothing when stacks differ
+    # .get: callbacks run before the script body, so plots the previous (possibly interrupted) run never reached have no key
+    modes = {st.session_state.get(f"render_mode_{i}", st.session_state.render_mode_all) for i in range(3)}
+    st.session_state.render_mode_all = modes.pop() if len(modes) == 1 else None
+
+
+st.session_state.setdefault("render_mode_all", "points")
+st.sidebar.radio("3D rendering (all stacks)", RENDER_MODES, key="render_mode_all",
+                 on_change=sync_all_render_modes, help=RENDER_HELP)
 
 # File upload
 uploaded_file = st.file_uploader("Choose an NPZ file", type=["npz"])
 
 if uploaded_file is not None:
     try:
-        # Load NPZ file
-        data = np.load(uploaded_file)
-
-        # Check what keys are present in the NPZ file
-        keys = list(data.keys())
-
-        if len(keys) != 1:
-            st.error(
-                "NPZ file must contain exactly one entry, but found: " + ", ".join(keys)
-            )
+        try:
+            blob, info = recognise(uploaded_file)  # raw dense or preprocessed sparse, as a dense grid
+        except ValueError as e:
+            st.error(str(e))
         else:
-            blob = data[keys[0]]
-
-            # Validate data
-            if blob.ndim != 3:
-                st.error(f"Expected 3D array, got {blob.ndim}D array")
-            elif blob.dtype != np.float64:
-                st.warning(f"Expected float64, got {blob.dtype}. Converting...")
-                blob = blob.astype(np.float64)
-
             st.success(f"Loaded data with shape: {blob.shape}")
+            st.info(info["description"])
+            if info["ligand"]:
+                st.info(f"Ligand code from the file name: {info['ligand']} (PDB {info['pdb_id']}). Preprocessed copies "
+                        "are stored under this code, or under `rare` if it isn't one of the trained classes.")
             st.info(
                 f"Non-zero values: {np.count_nonzero(blob)} / {blob.size} ({np.count_nonzero(blob) / blob.size * 100:.2f}%)"
             )
@@ -282,28 +238,18 @@ if uploaded_file is not None:
 
                 # Render existing stack items
                 for idx, item in enumerate(list(stack)):
+                    item.setdefault("id", uuid.uuid4().hex)  # widget keys follow the item, not its position
                     cls_name = item.get("class")
                     kwargs = item.get("kwargs", {}) or {}
                     with st.expander(f"{idx + 1}. {cls_name}", expanded=False):
                         # Show remove button
-                        if st.button("Remove", key=f"remove_{plot_idx}_{idx}"):
+                        if st.button("Remove", key=f"remove_{item['id']}"):
                             stack.pop(idx)
-                            st.session_state.transform_stacks[plot_idx] = stack
-                            # Some Streamlit installations don't expose experimental_rerun.
-                            # Guard the call so we don't raise AttributeError.
-                            if hasattr(st, "experimental_rerun") and callable(
-                                getattr(st, "experimental_rerun")
-                            ):
-                                st.experimental_rerun()
-                            # If experimental_rerun isn't available, updating session_state is
-                            # usually sufficient to trigger a rerun on next interaction.
-                            # Avoid continuing to process this expander after mutating `stack`
-                            # which would cause IndexError when accessing stack[idx].
-                            return
+                            st.rerun()
 
                         # show inputs for kwargs
                         for param_name, param_val in kwargs.items():
-                            widget_key = f"plot{plot_idx}_item{idx}_{param_name}"
+                            widget_key = f"item_{item['id']}_{param_name}"
                             val = st.text_input(
                                 f"{param_name}", value=str(param_val), key=widget_key
                             )
@@ -329,21 +275,26 @@ if uploaded_file is not None:
                     st.subheader(f"Stack {i + 1}")
                     render_stack_editor(i)
 
-            # Now render the three plots in aligned columns (editors are above)
             plot_cols = st.columns(3)
             for i, pcol in enumerate(plot_cols):
                 with pcol:
                     stack = st.session_state.transform_stacks[i]
-                    sampled_data = instantiate_and_apply_stack(blob.copy(), stack)
-                    title = f"Plot {i + 1}: {len(stack)} transforms"
+                    st.session_state.setdefault(f"render_mode_{i}", st.session_state.render_mode_all or "points")
+                    render_mode = st.radio("3D rendering", RENDER_MODES, key=f"render_mode_{i}", horizontal=True,
+                                           on_change=update_global_render_mode, help=RENDER_HELP)
+                    # ids stripped so identical stacks share a cache entry (same samples), as before
+                    sampled_data, notes, stack_sampled = apply_stack_cached(
+                        blob, [{k: v for k, v in it.items() if k != "id"} for it in stack])
+                    title = f"Plot {i + 1}: {len(stack) - len(notes)} of {len(stack)} transforms applied"
 
                     # Show stats
                     n_points = np.count_nonzero(sampled_data)
                     st.caption(f"Points displayed: {n_points}")
 
-                    # Create and display plot with fixed scale
-                    fig = create_3d_scatter(sampled_data, title, blob.shape)
-                    st.plotly_chart(fig, use_container_width=True)
+                    # One final render per plot; identical HTML on a rerun leaves the iframe alone (no reload).
+                    weight = "count" if info["density_sampled"] or stack_sampled else "values"
+                    components.html(plot_html(sampled_data, title, render_mode, f"plot_{i + 1}_{render_mode}", weight),
+                                    height=PLOT_HEIGHT + 20)
 
                     # Below each scatter, show a histogram of intensities for displayed points
                     intensities = sampled_data[sampled_data > 0]
@@ -359,10 +310,10 @@ if uploaded_file is not None:
                     else:
                         intens_norm = intensities  # empty
 
-                    hist_fig = create_intensity_histogram(
-                        intens_norm, f"Intensity distribution {i + 1}"
-                    )
-                    st.plotly_chart(hist_fig, use_container_width=True)
+                    show_intensity_histogram(intens_norm, f"Intensity distribution {i + 1}")
+                    for note in notes:  # below the plots, so the three plots stay aligned
+                        st.warning(note)
+
 
     except Exception as e:
         st.error(f"Error loading file: {str(e)}")
@@ -374,8 +325,8 @@ else:
     with st.expander("ℹ️ Instructions"):
         st.markdown("""
     ### How to use:
-    1. Upload an NPZ file containing a 'blob' entry with 3D probability data
-    2. The data should be a 3D numpy array of float64 probabilities (values between 0 and 1)
+    1. Upload a raw blob (one dense 3D array, e.g. `arr_0`) or a preprocessed file (`indices`, `values`, `shape`)
+    2. The app reports which kind it is (raw thresholded/unthresholded, uniform, probabilistic) and the ligand code from the file name
     3. Three interactive 3D plots will be displayed side by side
     4. Edit the transform stacks in the "Transform stacks" section above the plots.
     5. For each stack you can add transforms, remove them, and edit their kwargs. The plots below will apply the stacks in order.
