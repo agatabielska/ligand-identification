@@ -7,14 +7,14 @@ data:
   max_points: 2000
   
 train:
-  epochs: 15
+  epochs: 25
   learning_rate: 3e-3
   out_channels: 91
   normalize_data: true
   weight_decay: 5e-2
   gradient_clip_val: null
   early_stopping:
-    patience: 15
+    patience: 5
     mode: min
     monitor: val_loss
 

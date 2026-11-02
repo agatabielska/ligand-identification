@@ -1,0 +1,3 @@
+uv run -m src.scripts.hpo --study-name hpo-spectral-UP --project hpo-spectral-UP paths.data_dir=data/unthresholded_transform_probabilistic model=spectral
+uv run -m src.scripts.hpo --study-name hpo-spectral-TU --project hpo-spectral-TU paths.data_dir=data/thresholded_transform_uniform model=spectral
+uv run -m src.scripts.hpo --study-name hpo-spectral-TP --project hpo-spectral-TP paths.data_dir=data/thresholded_transform_probabilistic model=spectral
