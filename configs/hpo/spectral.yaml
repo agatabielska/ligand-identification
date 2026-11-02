@@ -1,0 +1,128 @@
+# Search space for hpo.py.  Key = Hydra config path of the parameter to tune.
+#
+#   type: float        low, high, [log: true], [step]
+#   type: int          low, high, [log: true], [step]
+#   type: categorical  values: [...]       (values may be lists, bools, null, strings)
+#
+# Optional per-entry keys:
+#   enabled: false     skip this parameter (keeps the value from the config files)
+#   also: [paths]      write the same sampled value to extra config paths
+#   cap_by: path       upper bound = value sampled for another (earlier) parameter
+#
+# Parameters not listed here keep their value from configs/*.yaml / command-line overrides.
+# Delete or comment out an entry (or set enabled: false) to freeze it.
+
+# ---- optimisation ---------------------------------------------------------
+model.learning_rate:
+  type: float
+  low: 3.0e-4
+  high: 1.0e-2
+  log: true
+  also: [train.learning_rate]      # spectral reads model.*, clifford reads train.*
+
+model.weight_decay:
+  type: float
+  low: 1.0e-3
+  high: 1.0e-1
+  log: true
+  also: [train.weight_decay]
+
+model.warmup_frac:
+  type: float
+  low: 0.0
+  high: 0.15
+
+# ---- regularisation / augmentation ---------------------------------------
+model.head_dropout:
+  type: float
+  low: 0.0
+  high: 0.5
+
+model.feat_dropout:
+  type: float
+  low: 0.0
+  high: 0.3
+
+model.point_dropout:
+  type: float
+  low: 0.0
+  high: 0.3
+
+model.density_noise:
+  type: float
+  low: 0.0
+  high: 0.3
+
+model.glob_noise:
+  type: float
+  low: 0.0
+  high: 0.1
+
+model.clean_probability:
+  type: float
+  low: 0.0
+  high: 0.5
+
+model.label_smoothing:
+  type: float
+  low: 0.0
+  high: 0.15
+
+# ---- architecture ---------------------------------------------------------
+model.widths:
+  type: categorical
+  values: [[256, 128], [512, 256], [1024, 512], [512, 256, 128]]
+
+model.n_mix:
+  type: categorical
+  values: [8, 16, 32, 64, 128]
+
+model.n_channels:
+  type: int
+  low: 1
+  high: 3
+
+model.glob_dim:
+  type: categorical
+  values: [32, 64, 128]
+
+# Expensive / data-dependent: widen with care (memory and runtime grow quickly).
+model.n_shells:
+  type: int
+  low: 3
+  high: 6
+
+model.lmax:
+  type: int
+  low: 3
+  high: 11
+
+model.bispec_lmax:
+  type: int
+  low: 2
+  high: 11
+  cap_by: model.lmax               # never exceeds the sampled lmax
+
+model.r_max:
+  type: float
+  low: 0.8
+  high: 1.5
+
+# ---- discrete model switches ---------------------------------------------
+# Add whatever other options your model supports to `values`.
+
+model.in_bn:
+  type: categorical
+  values: [true, false]
+
+model.norm:
+  type: categorical
+  values: [layer, batch]
+
+model.pow_mode:
+  type: categorical
+  values: [triu, diag, none]
+
+model.gram:
+  type: categorical
+  values: [none, density_full, density, all]

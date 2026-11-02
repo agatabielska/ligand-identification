@@ -1,161 +1,122 @@
-from src.models.clifford.model import CliffordSteerableNetwork
-from src.models.e3nn.model import E3NNPointCloudModel
-from src.pipeline.dataset import BlobDataset
-from pytorch_lightning.callbacks import (
-    ModelCheckpoint,
-    EarlyStopping,
-    LearningRateMonitor,
-)
-from pytorch_lightning.loggers import WandbLogger
-from torch.utils.data import DataLoader
-import pytorch_lightning as pl
-from omegaconf import DictConfig, OmegaConf
-from src.utils.set_seed import set_seed
 from pathlib import Path
-import numpy as np
+
 import hydra
+import pytorch_lightning as pl
 import torch
+from omegaconf import DictConfig, OmegaConf
+from pytorch_lightning.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
+from pytorch_lightning.loggers import WandbLogger
+from torch.utils.data import DataLoader, TensorDataset
 
+from src.models.clifford.model import CliffordSteerableNetwork
+from src.models.e3nn.configurable_spectral import ConfigurableSpectralModel
+from src.pipeline.data_loader import build_data, validate_data_dir
+from src.utils.set_seed import set_seed
 
-def transform_clifford(npz):
-    indices = npz["indices"]
-    points = np.pad(
-        indices,
-        ((0, 2000 - indices.shape[0]), (0, 0)),
-        mode="constant",
-        constant_values=0,
+    
+def build_spectral_training(cfg: DictConfig):
+    loaders = build_data(cfg, "spectral")
+    train_loader, validation_loader, test_loader = loaders
+
+    model_cfg, train_cfg = cfg.model, cfg.train
+    model = ConfigurableSpectralModel(
+        num_classes=int(train_cfg.out_channels),
+        **OmegaConf.to_container(model_cfg, resolve=True),
     )
-    points = points.transpose(1, 0)
-    points = points.astype(np.float32)
-    return torch.from_numpy(points)
+    
+    if hasattr(train_loader, "y"):
+        train_y = train_loader.y
+    else:
+        train_y = torch.cat([batch[1] for batch in train_loader], dim=0)
+    model.set_class_counts(torch.bincount(train_y, minlength=model.num_classes))
+
+    # train loader is of form (x, y, global_values), where global_values is a tensor of shape (N, 12)
+    if hasattr(train_loader, "g"):
+        global_train = train_loader.g
+    else:
+        global_train = torch.cat([batch[2] for batch in train_loader], dim=0)
+
+    global_mean = global_train.mean(0)
+    global_std = global_train.std(0).clamp_min(1e-6)
+    model.global_mean.copy_(global_mean)
+    model.global_std.copy_(global_std)
+    return model, loaders
 
 
-def transform_e3nn(npz):
-    indices = npz["indices"]
-    values = npz["values"]
-    coords = indices.astype(np.float32)
-    values = values.astype(np.float32)
-    points = np.column_stack([coords, values])
-    current_points = points.shape[0]
-
-    if current_points < 2000:
-        padding = np.zeros((2000 - current_points, 4), dtype=np.float32)
-        points = np.vstack([points, padding])
-
-    return torch.from_numpy(points)
-
-
-def get_dataset(path: Path, cfg, transform, label_to_idx: dict):
-    return BlobDataset(
-        path=str(path),
-        transform=transform,
-        normalize=cfg.train.normalize_data,
-        cache=cfg.machine.cache_dataset,
-        num_workers=cfg.machine.num_workers,
-        label_to_idx=label_to_idx,
+def build_clifford_training(cfg: DictConfig):
+    train_loader, validation_loader, test_loader = build_data(cfg, "clifford")
+    model_cfg, train_cfg = cfg.model, cfg.train
+    model = CliffordSteerableNetwork(
+        p=model_cfg.p,
+        q=model_cfg.q,
+        in_channels=model_cfg.in_channels,
+        hidden_channels=model_cfg.hidden_channels,
+        out_channels=train_cfg.out_channels,
+        n_shells=model_cfg.n_shells,
+        kernel_size=model_cfg.kernel_size,
+        learning_rate=train_cfg.learning_rate,
+        weight_decay=train_cfg.weight_decay,
     )
+    return model, (train_loader, validation_loader, test_loader)
 
 
-def get_dataloader(dataset, cfg, shuffle: bool):
-    return DataLoader(
-        dataset,
-        batch_size=cfg.machine.batch_size,
-        shuffle=shuffle,
-        num_workers=cfg.machine.num_workers if not cfg.machine.cache_dataset else 1,
-        pin_memory=cfg.machine.pin_memory,
-        persistent_workers=True if cfg.machine.num_workers > 0 else False,
+TRAINING_BUILDERS = {
+    "spectral": build_spectral_training,
+    "clifford": build_clifford_training,
+}
+
+
+def run_training(cfg: DictConfig):
+    model_type = cfg.model.type
+    if model_type not in TRAINING_BUILDERS:
+        raise ValueError(f"Unknown model type: {model_type}")
+
+    model, (train_loader, validation_loader, test_loader) = TRAINING_BUILDERS[model_type](cfg)
+    logger_kwargs = {
+        "project": "ligand-identification",
+        "config": OmegaConf.to_container(cfg, resolve=True),
+    }
+    if cfg.wandb.run_name is not None:
+        logger_kwargs["name"] = cfg.wandb.run_name
+    logger = WandbLogger(**logger_kwargs)
+    checkpoint_dir = Path(cfg.paths.model_checkpoint) / logger.experiment.name
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    early_stopping = cfg.train.early_stopping
+    trainer = pl.Trainer(
+        max_epochs=cfg.train.epochs,
+        callbacks=[
+            ModelCheckpoint(
+                monitor=early_stopping.monitor,
+                mode=early_stopping.mode,
+                dirpath=str(checkpoint_dir),
+                filename="model-{epoch:02d}-{val_loss:.2f}",
+                save_top_k=3,
+                save_last=True,
+            ),
+            EarlyStopping(
+                monitor=early_stopping.monitor,
+                mode=early_stopping.mode,
+                patience=early_stopping.patience,
+                verbose=True,
+            ),
+            LearningRateMonitor(logging_interval="step"),
+        ],
+        accelerator="auto",
+        devices=cfg.machine.devices,
+        precision=cfg.train.get("precision", "32-true"),
+        log_every_n_steps=10,
+        logger=logger,
+        gradient_clip_val=cfg.train.gradient_clip_val,
     )
+    trainer.fit(model, train_loader, validation_loader)
+    trainer.test(ckpt_path="best", dataloaders=test_loader)
 
 
 @hydra.main(config_path="../../configs", config_name="config", version_base=None)
 def main(cfg: DictConfig):
     set_seed(cfg.random_seed)
-    wandb_logger_kwargs = {
-        "project": "ligand-identification",
-        "config": OmegaConf.to_container(cfg, resolve=True),
-    }
-    if cfg.wandb.run_name is not None:
-        wandb_logger_kwargs["name"] = cfg.wandb.run_name
-
-    wandb_logger = WandbLogger(**wandb_logger_kwargs)
-    run_ckpt_dir = Path(cfg.paths.model_checkpoint) / wandb_logger.experiment.name
-    run_ckpt_dir.mkdir(parents=True, exist_ok=True)
-
-    if cfg.model.type == "clifford" or cfg.model.type == "clifford_v2":
-        transform = transform_clifford
-    elif cfg.model.type == "e3nn":
-        transform = transform_e3nn
-    else:
-        raise ValueError(f"Unknown model type: {cfg.model.type}")
-
-    all_classes = sorted(set(
-        d.name
-        for folder_name in ["train", "val", "test"]
-        for d in (Path(cfg.paths.data_dir) / folder_name).iterdir()
-        if d.is_dir()
-    ))
-    label_to_idx = {name: idx for idx, name in enumerate(all_classes)}
-
-    train_dataset = get_dataset(Path(cfg.paths.data_dir) / "train", cfg, transform, label_to_idx)
-    val_dataset   = get_dataset(Path(cfg.paths.data_dir) / "val",   cfg, transform, label_to_idx)
-    test_dataset  = get_dataset(Path(cfg.paths.data_dir) / "test",  cfg, transform, label_to_idx)
-    train_dataloader = get_dataloader(train_dataset, cfg, shuffle=True)
-    val_dataloader = get_dataloader(val_dataset, cfg, shuffle=False)
-    test_dataloader = get_dataloader(test_dataset, cfg, shuffle=False)
-
-    checkpoint_callback = ModelCheckpoint(
-        monitor=cfg.train.early_stopping.monitor,
-        dirpath=str(run_ckpt_dir),
-        filename="model-{epoch:02d}-{val_loss:.2f}",
-        mode=cfg.train.early_stopping.mode,
-        save_top_k=3,
-        save_last=True,
-    )
-
-    early_stopping = EarlyStopping(
-        monitor=cfg.train.early_stopping.monitor,
-        patience=cfg.train.early_stopping.patience,
-        mode=cfg.train.early_stopping.mode,
-        verbose=True,
-    )
-
-    lr_monitor = LearningRateMonitor(logging_interval="epoch")
-
-    trainer = pl.Trainer(
-        max_epochs=cfg.train.epochs,
-        callbacks=[checkpoint_callback, early_stopping, lr_monitor],
-        accelerator="auto",
-        devices=cfg.machine.devices,
-        log_every_n_steps=10,
-        logger=wandb_logger,
-        gradient_clip_val=cfg.train.gradient_clip_val,
-    )
-
-    if cfg.model.type == "clifford":
-        model = CliffordSteerableNetwork(
-            p=cfg.model.p,
-            q=cfg.model.q,
-            in_channels=cfg.model.in_channels,
-            hidden_channels=cfg.model.hidden_channels,
-            out_channels=cfg.train.out_channels,
-            n_shells=cfg.model.n_shells,
-            kernel_size=cfg.model.kernel_size,
-            learning_rate=cfg.train.learning_rate,
-            weight_decay=cfg.train.weight_decay,
-        )
-
-    elif cfg.model.type == "e3nn":
-        model = E3NNPointCloudModel(
-            num_classes=cfg.train.out_channels,
-            learning_rate=cfg.train.learning_rate,
-            weight_decay=cfg.train.weight_decay,
-            batch_norm_momentum=cfg.model.batch_norm_momentum,
-        )
-    else:
-        raise ValueError(f"Unknown model type: {cfg.model.type}")
-
-    trainer.fit(model, train_dataloader, val_dataloader)
-    trainer.test(ckpt_path="best", dataloaders=test_dataloader)
+    validate_data_dir(Path(cfg.paths.data_dir))
+    run_training(cfg)
 
 
 if __name__ == "__main__":

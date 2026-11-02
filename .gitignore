@@ -17,7 +17,12 @@
 /wandb/
 /allocate*
 
-/slurm/
+/slurm/logs/
+ensemble*.out
+log_*.txt
+run_*.out
+logs/
+results/
 
 # MinkLoc-generated files
 /minkloc/data/

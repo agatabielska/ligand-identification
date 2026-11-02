@@ -22,3 +22,6 @@
 # uv run -m src.scripts.train paths.data_dir=data/thresholded_transform_probabilistic model=clifford wandb.run_name=thresholded_probabilistic_clifford_flat_input_scalarshell_fixed
 # uv run -m src.scripts.train paths.data_dir=data/thresholded_transform_uniform model=clifford wandb.run_name=thresholded_uniform_clifford_flat_input_scalarshell_fixed
 # uv run -m src.scripts.train paths.data_dir=data/unthresholded_transform_probabilistic model=clifford wandb.run_name=unthresholded_probabilistic_clifford_flat_input_scalarshell_fixed
+
+
+uv run -m src.scripts.train paths.data_dir=data/unthresholded_transform_probabilistic model=spectral wandb.run_name=UP_SOTA

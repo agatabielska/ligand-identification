@@ -1,22 +1,25 @@
 defaults:
-  - model: clifford
+  - model: spectral
   - machine: hpc
   - _self_
 
+data:
+  max_points: 2000
+  
 train:
-  epochs: 100
-  learning_rate: 1e-3
-  out_channels: 97
+  epochs: 25
+  learning_rate: 3e-3
+  out_channels: 91
   normalize_data: true
-  weight_decay: 1e-4
+  weight_decay: 5e-2
   gradient_clip_val: null
   early_stopping:
-    patience: 15
+    patience: 5
     mode: min
     monitor: val_loss
 
 paths:
-  data_dir: data/processed
+  data_dir: data/unthresholded_transform_probabilistic
   model_checkpoint: checkpoints/
 
 wandb:
