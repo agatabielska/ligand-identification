@@ -169,7 +169,6 @@ def preprocess(
     file_paths: List[Path],
     file_labels: List[str],
     output_path: Path,
-    number_of_datapoints: int = 2000,
     transform_stack: str = "probabilistic",
     max_points: int = 2000,
 ) -> None:
@@ -323,7 +322,6 @@ if __name__ == "__main__":
             futures.append(pool.submit(
                 preprocess, sublist, sublabels,
                 output_folder / "train",
-                number_of_datapoints=args.number_of_datapoints,
                 transform_stack=args.transform_stack,
                 max_points=args.max_points,
             ))
@@ -331,7 +329,6 @@ if __name__ == "__main__":
             futures.append(pool.submit(
                 preprocess, sublist, sublabels,
                 output_folder / "val",
-                number_of_datapoints=args.number_of_datapoints,
                 transform_stack=args.transform_stack,
                 max_points=args.max_points,
             ))
@@ -339,7 +336,6 @@ if __name__ == "__main__":
             futures.append(pool.submit(
                 preprocess, sublist, sublabels,
                 output_folder / "test",
-                number_of_datapoints=args.number_of_datapoints,
                 transform_stack=args.transform_stack,
                 max_points=args.max_points,
             ))            
