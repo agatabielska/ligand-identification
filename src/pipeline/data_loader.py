@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 
 from src.pipeline.dataset import BlobDataset
 from src.pipeline.global_statistics import complete_input_statistics
+from src.utils.set_seed import seed_worker
 
 
 MAX_POINTS = 2000
@@ -39,8 +40,25 @@ def transform_e3nn(npz, max_points: int = MAX_POINTS):
 class GPULoader:
     """Keep a split on the selected device when memory permits."""
 
-    def __init__(self, dataset, batch_size: int, shuffle: bool, device, num_workers: int = 0):
-        loader = DataLoader(dataset, batch_size=256, shuffle=False, num_workers=min(num_workers, 8))
+    def __init__(
+        self,
+        dataset,
+        batch_size: int,
+        shuffle: bool,
+        device,
+        num_workers: int = 0,
+        seed: int = 42,
+    ):
+        loader_generator = torch.Generator()
+        loader_generator.manual_seed(seed)
+        loader = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=min(num_workers, 8),
+            worker_init_fn=seed_worker,
+            generator=loader_generator,
+        )
         samples = [(x, torch.as_tensor(y).reshape(-1), *rest) for x, y, *rest in loader]
         x = torch.cat([sample[0] for sample in samples])
         y = torch.cat([sample[1] for sample in samples]).long()
@@ -53,6 +71,8 @@ class GPULoader:
         self.shuffle = shuffle
         self.device = device
         self.on_gpu = False
+        self.generator = torch.Generator(device=device)
+        self.generator.manual_seed(seed)
         if device.type == "cuda":
             try:
                 self.x, self.y = x.to(device), y.to(device)
@@ -76,7 +96,7 @@ class GPULoader:
         count = len(self.y)
         index_device = self.device if self.on_gpu else "cpu"
         indices = (
-            torch.randperm(count, device=index_device)
+            torch.randperm(count, generator=self.generator, device=index_device)
             if self.shuffle
             else torch.arange(count, device=index_device)
         )
@@ -139,11 +159,12 @@ def build_data(cfg: DictConfig, model_type: str):
         for split in splits
     }
 
-    batch_size, workers = cfg.machine.batch_size, cfg.machine.num_workers
+    batch_size, workers = int(cfg.batch_size), cfg.machine.num_workers
+    seed = int(cfg.seed)
     if cfg.machine.use_gpu_loader:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return tuple(
-            GPULoader(datasets[split], batch_size, split == "train", device, workers)
+            GPULoader(datasets[split], batch_size, split == "train", device, workers, seed)
             for split in splits
         )
     return tuple(
@@ -154,6 +175,8 @@ def build_data(cfg: DictConfig, model_type: str):
             num_workers=workers if not cfg.machine.cache_dataset else 1,
             pin_memory=cfg.machine.pin_memory,
             persistent_workers=workers > 0,
+            worker_init_fn=seed_worker,
+            generator=torch.Generator().manual_seed(seed),
         )
         for split in splits
     )

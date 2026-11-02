@@ -205,7 +205,7 @@ def run_job(spec, seed, data, dev, name="", use_wandb=False, wandb_project=WANDB
     run = None
     if use_wandb and wandb is not None:
         run = wandb.init(project=wandb_project, name=f"{name}__s{seed}", group=name, job_type="big_runs",
-                         tags=["big_runs", name], reinit=True,
+                         tags=["big_runs", name], resume="never", reinit=True,
                          config=dict(preset=name, seed=seed, cache=spec["cache"], net=net_kw, train=tc,
                                      n_shells=meta["n_shells"], num_classes=nc, n_glob=len(cols)))
 
@@ -331,7 +331,7 @@ def log_report_wandb(summ, pool_res, a):
     if wandb is None or not summ:
         return
     run = wandb.init(project=a.wandb_project, name="big_runs_report", group="report", job_type="report",
-                     tags=["big_runs", "report"], reinit=True, config=vars(a))
+                     tags=["big_runs", "report"], resume="never", reinit=True, config=vars(a))
     cols = ["preset"] + list(next(iter(summ.values())).keys())
     run.log({"presets": wandb.Table(columns=cols, data=[[n, *d.values()] for n, d in summ.items()])})
     for name, d in pool_res.items():
@@ -390,7 +390,7 @@ def load_raw():
         cfg = compose(config_name="config", overrides=[
             f"paths.data_dir={DATA_DIR}", "model=spectral", f"model.n_shells={N_SHELLS}",
             f"model.lmax={LMAX}", "machine.batch_size=256", "machine.num_workers=8"])
-    set_seed(cfg.random_seed)
+    set_seed(cfg.seed)
     tr, va, te = build_data(cfg, "spectral")
     for name, ld in (("train", tr), ("val", va), ("test", te)):
         assert ld.x.shape[1] == MAX_POINTS, f"{name}: {ld.x.shape[1]} points, expected {MAX_POINTS}"
@@ -622,7 +622,7 @@ def run_default_from_config(cfg, globals_mode="points_2000", output_dir=None):
         "spectral",
         net,
         training,
-        int(cfg.random_seed),
+        int(cfg.seed),
         data,
         dev,
         n_shells=model.n_shells,
@@ -633,7 +633,7 @@ def run_default_from_config(cfg, globals_mode="points_2000", output_dir=None):
         clean_probability=model.clean_probability,
     )
     print(
-        f"spectral seed {cfg.random_seed}: ep {result['epoch'] + 1:2d} | "
+        f"spectral seed {cfg.seed}: ep {result['epoch'] + 1:2d} | "
         f"val acc {result['val_acc']:.4f} loss {result['val_loss']:.4f} | "
         f"test acc {result['test_acc']:.4f} rec {result['test_rec']:.4f} | "
         f"{result['params'] / 1e6:.2f}M params, d_in {result['d_in']}, "

@@ -75,6 +75,7 @@ def run_training(cfg: DictConfig, data_loaders=None):
     model, (train_loader, validation_loader, test_loader) = TRAINING_BUILDERS[model_type](
         cfg, data_loaders
     )
+    run_name = cfg.wandb.get("run_name")
     logger_kwargs = {
         "project": cfg.wandb.get("project", "ligand-identification"),
         "config": OmegaConf.to_container(cfg, resolve=True),
@@ -83,8 +84,7 @@ def run_training(cfg: DictConfig, data_loaders=None):
         logger_kwargs["name"] = cfg.wandb.run_name
     if cfg.wandb.get("tags"):
         logger_kwargs["tags"] = list(cfg.wandb.tags)
-    if run_name := cfg.wandb.get("run_name"):
-        logger_kwargs["id"] = str(run_name)
+    logger_kwargs["resume"] = "never"
     logger = WandbLogger(**logger_kwargs)
     wandb_run = logger.experiment
     checkpoint_dir = Path(cfg.paths.model_checkpoint) / (
@@ -117,6 +117,7 @@ def run_training(cfg: DictConfig, data_loaders=None):
         log_every_n_steps=10,
         logger=logger,
         gradient_clip_val=cfg.train.gradient_clip_val,
+        deterministic=True,
     )
     try:
         trainer.fit(model, train_loader, validation_loader)
@@ -127,7 +128,9 @@ def run_training(cfg: DictConfig, data_loaders=None):
 
 @hydra.main(config_path="../../configs", config_name="config", version_base=None)
 def main(cfg: DictConfig):
-    set_seed(cfg.random_seed)
+    set_seed(cfg.seed)
+
+    pl.seed_everything(cfg.seed, workers=True)
     validate_data_dir(Path(cfg.paths.data_dir))
     run_training(cfg)
 

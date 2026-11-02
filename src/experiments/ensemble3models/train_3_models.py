@@ -88,7 +88,7 @@ def main(experiment_cfg: DictConfig) -> None:
         )
         cfg.wandb.run_name = f"{run_id}-{cfg.wandb.run_name}"
         cfg.wandb.tags = [f"run:{run_id}", cfg.wandb.experiment, *list(cfg.wandb.tags)]
-        set_seed(cfg.random_seed)
+        set_seed(cfg.seed)
         run_training(cfg)
 
 

@@ -43,7 +43,7 @@ def main(cfg: DictConfig) -> None:
         ]
         if loss_cfg["name"] == "focal":
             run_cfg.train.gradient_clip_val = 1.0
-        set_seed(int(run_cfg.random_seed))
+        set_seed(int(run_cfg.seed))
         print(f"Training and testing loss: {loss_cfg['name']}")
         run_training(run_cfg, data_loaders=data_loaders)
 

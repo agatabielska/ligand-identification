@@ -5,6 +5,9 @@ defaults:
 
 data:
   max_points: 2000
+
+batch_size: 256
+seed: 42
   
 train:
   epochs: 50
@@ -27,5 +30,3 @@ paths:
 
 wandb:
   run_name: null
-
-random_seed: 42

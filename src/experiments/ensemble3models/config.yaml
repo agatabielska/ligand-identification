@@ -18,6 +18,9 @@ ensemble:
   weight_decay: 0.00005
   feature_noise: 0.5
   loss: ${loss}
+  # Used by --train-best; normal runs retain the original linear correction.
+  head_widths: []
+  head_dropout: 0.2
 
 experiments:
   experiment1:
