@@ -13,6 +13,9 @@ train:
   normalize_data: true
   weight_decay: 5e-2
   gradient_clip_val: null
+  loss:
+    name: cross-entropy
+    label_smoothing: 0.1
   early_stopping:
     patience: 5
     mode: min
