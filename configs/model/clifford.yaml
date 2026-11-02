@@ -3,5 +3,8 @@ p: 3
 q: 0
 in_channels: 3
 hidden_channels: [32, 64, 64, 128]
+classifier: [512]
 n_shells: 3
 kernel_size: 3
+learning_rate: 3e-3
+weight_decay: 5e-2

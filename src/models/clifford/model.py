@@ -390,6 +390,7 @@ class CliffordSteerableNetwork(pl.LightningModule):
         q: int = 0,
         in_channels: int = 1,
         hidden_channels: List[int] = [16, 32, 64],
+        classifier: List[int] = [512],
         out_channels: int = 10,
         n_shells: int = 3,
         kernel_size: int = 3,
@@ -429,13 +430,15 @@ class CliffordSteerableNetwork(pl.LightningModule):
 
         # Global pooling and classifier
         self.pool = nn.AdaptiveAvgPool1d(1)
-        # TODO: Check if this additional Linear layer is necessary
+
         self.classifier = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(prev_c, 512),
-            nn.ReLU(),
-            nn.Linear(512, out_channels),
         )
+        for hidden in classifier:
+            self.classifier.append(nn.Linear(prev_c, hidden))
+            self.classifier.append(nn.ReLU())
+            prev_c = hidden
+        self.classifier.append(nn.Linear(prev_c, out_channels))
 
         # I have to use torchmetrics for macro recall, because it cannot be computed
         # from batches, and sklearn's recall_score doesn't work with accumulating the

@@ -18,14 +18,12 @@ model.learning_rate:
   low: 3.0e-4
   high: 1.0e-2
   log: true
-  also: [train.learning_rate]      # spectral reads model.*, clifford reads train.*
 
 model.weight_decay:
   type: float
   low: 1.0e-3
   high: 1.0e-1
   log: true
-  also: [train.weight_decay]
 
 model.warmup_frac:
   type: float

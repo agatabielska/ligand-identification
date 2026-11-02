@@ -8,10 +8,8 @@ data:
   
 train:
   epochs: 25
-  learning_rate: 3e-3
   out_channels: 91
   normalize_data: true
-  weight_decay: 5e-2
   gradient_clip_val: null
   early_stopping:
     patience: 5

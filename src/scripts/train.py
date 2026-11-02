@@ -51,11 +51,12 @@ def build_clifford_training(cfg: DictConfig):
         q=model_cfg.q,
         in_channels=model_cfg.in_channels,
         hidden_channels=model_cfg.hidden_channels,
+        classifier=model_cfg.classifier,
         out_channels=train_cfg.out_channels,
         n_shells=model_cfg.n_shells,
         kernel_size=model_cfg.kernel_size,
-        learning_rate=train_cfg.learning_rate,
-        weight_decay=train_cfg.weight_decay,
+        learning_rate=model_cfg.learning_rate,
+        weight_decay=model_cfg.weight_decay,
     )
     return model, (train_loader, validation_loader, test_loader)
 
