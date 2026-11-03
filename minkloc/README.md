@@ -314,10 +314,64 @@ the available split).
 
 Each run records training batch loss (`train/batch_loss`) plus complete training and
 validation/test epoch metrics: loss, accuracy, top-5/top-10/top-20 accuracy,
-macro and micro recall, micro precision, and micro F1. It also records the
-learning rate, model/optimizer/dataset metadata, and a W&B model artifact.
+macro and micro recall, micro precision, micro F1, and mean rank. It also
+records the learning rate, model/optimizer/dataset metadata, and a W&B model
+artifact.
 HPO training and validation metrics are logged once per epoch for every trial,
 while final test metrics are logged after refitting.
+
+The shared [`logger_wandb.py`](src/logger_wandb.py) module calculates mean rank
+from the true-label position in the descending logit ranking. It is logged in
+W&B history and summary for `train/mean_rank`, `validation/mean_rank`, and
+`test/mean_rank` wherever those phases are evaluated.
+
+To rerun only the test evaluation for a final W&B checkpoint from inside the
+GPU container:
+
+```bash
+python evaluate_checkpoint.py \
+  --run-path agata-bielska/ligans-hpo-2/<run-id> \
+  --dataset unthresholded-transform-probabilistic
+```
+
+The script downloads the source run's model artifact, evaluates only its
+`test` (or `holdout`) split, and creates a new W&B `test-evaluation` run.
+Pass `--artifact entity/project/artifact:version` when the source run has
+more than one model artifact.
+
+If the W&B installation does not support the SDK API, download the checkpoint
+from the W&B web UI and copy it into the container, then run without
+`--run-path`:
+
+```bash
+python evaluate_checkpoint.py \
+  --checkpoint /app/checkpoints/final.pt \
+  --dataset thresholded-transform-uniform \
+  --project ligans-hpo-2 \
+  --entity agata-bielska
+```
+
+For a tuned architecture, pass its run configuration as JSON with
+`--model-config`; the JSON should contain keys such as `planes`, `layers`,
+`feature_size`, `block`, and `pooling`.
+
+The tuned configuration for the unthresholded probabilistic final checkpoint
+is provided at
+[`configs/final-unthresholded-transform-probabilistic.json`](configs/final-unthresholded-transform-probabilistic.json).
+
+With the HPO outputs mounted under `logs/hpo` (or `hpo`), the evaluator
+discovers every configured dataset's `final.pt` and matching hyperparameters
+automatically:
+
+```bash
+python evaluate_checkpoint.py \
+  --project ligans-hpo-2 \
+  --entity agata-bielska
+```
+
+Use `--dataset DATASET_NAME` to evaluate one dataset. Each dataset creates one
+new W&B test-evaluation run with a single metric event containing the existing
+test metrics plus `test/mean_rank`; no model artifact is uploaded.
 
 Training loaders drop an incomplete final batch so NetVLAD BatchNorm never
 receives a singleton batch. Validation and test loaders retain all examples.

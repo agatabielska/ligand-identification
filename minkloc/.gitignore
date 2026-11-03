@@ -52,3 +52,5 @@ scripts/checkpoints
 wandb/
 outputs/
 checkpoints/
+
+scripts/hpo
