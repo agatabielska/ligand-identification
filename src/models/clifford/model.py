@@ -37,7 +37,7 @@ class ScalarShell(nn.Module):
         # Learnable sampling points on unit sphere (normalized during forward)
         self.sampling_points = nn.Parameter(torch.randn(n_points, self.dim))
 
-    def forward(self, eta_pq: torch.Tensor, r: float) -> torch.Tensor:
+    def forward(self, eta_pq: torch.Tensor, r: float) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
             eta_pq: Metric tensor of shape (p+q, p+q)
@@ -45,6 +45,7 @@ class ScalarShell(nn.Module):
 
         Returns:
             s: Scalar features on the shell (n_points,)
+            v: Normalized sampling points on the shell (n_points, p+q)
         """
         # Normalize sampling points to unit sphere
         v = F.normalize(self.sampling_points, dim=-1)
@@ -61,7 +62,7 @@ class ScalarShell(nn.Module):
             -torch.abs(eta_vv) / (2 * self.sigma**2)
         )
 
-        return s
+        return s, v
 
 
 class CGENN(nn.Module):
@@ -204,12 +205,9 @@ class CliffordSteerableKernel(nn.Module):
             nn.Conv1d(c_out * c_in, c_out * c_in, 1),
         )
 
-    def forward(self, spatial_grid: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(self) -> torch.Tensor:
         """
         Construct learnable steerable kernel.
-
-        Args:
-            spatial_grid: Optional spatial grid for kernel positions
 
         Returns:
             k: Steerable kernel (c_out, c_in, kernel_size)
@@ -217,8 +215,7 @@ class CliffordSteerableKernel(nn.Module):
         device = self.eta.device
 
         # Create spatial grid for kernel
-        if spatial_grid is None:
-            spatial_grid = self._create_spatial_grid(device)
+        spatial_grid = self._create_spatial_grid(device)
 
         # Initialize accumulated kernel
         k_accum = torch.zeros(
@@ -233,11 +230,8 @@ class CliffordSteerableKernel(nn.Module):
         for shell_idx in range(self.n_shells):
             r = self.radii[shell_idx]
 
-            # Compute scalar shell features
-            s_n = self.scalar_shells[shell_idx](self.eta, r)  # (n_points,)
-
-            # Get sampling points
-            v_n = F.normalize(self.scalar_shells[shell_idx].sampling_points, dim=-1)
+            # Compute scalar and vector features on the shell
+            s_n, v_n = self.scalar_shells[shell_idx](self.eta, r)  # (n_points,)
 
             # Embed scalars and vectors as multivectors
             sv_concat = torch.cat([s_n.unsqueeze(-1), v_n], dim=-1)  # (n_points, 1+p+q)
@@ -252,16 +246,12 @@ class CliffordSteerableKernel(nn.Module):
             # Apply CGENN - it will handle the shape internally
             k_n = self.cgenn_nets[shell_idx](
                 x_n_agg
-            )  # Should output (c_in, c_out, dim_mv)
+            )  # Outputs (c_out, dim_mv)
 
-            # Check shape and permute if needed
-            if len(k_n.shape) == 3:
-                k_n = k_n.permute(1, 0, 2)  # (c_out, c_in, dim_mv)
-            else:
-                # If shape is (c_out, dim_mv), expand for c_in
-                k_n = k_n.unsqueeze(1).expand(
-                    -1, self.c_in, -1
-                )  # (c_out, c_in, dim_mv)
+            # Expand for c_in
+            k_n = k_n.unsqueeze(1).expand(
+                -1, self.c_in, -1
+            )  # (c_out, c_in, dim_mv)
 
             # Broadcast to spatial dimensions
             k_n = k_n.unsqueeze(-1)
@@ -277,7 +267,7 @@ class CliffordSteerableKernel(nn.Module):
         # k_accum shape: (c_out, c_in, dim_mv, k)
         # We need to reduce dim_mv dimension for standard convolution
 
-        # Option 1: Average over multivector components
+        # Average over multivector components
         k_reduced = k_accum.mean(dim=2)  # (c_out, c_in, k)
 
         # Apply learnable kernel head transformation
@@ -288,7 +278,7 @@ class CliffordSteerableKernel(nn.Module):
             self.kernel_size
         )
 
-        # Use 3D conv to mix and transform kernel
+        # Use 1D conv to mix and transform kernel
         k_transformed = self.kernel_head(k_reshaped)  # (1, c_out*c_in, k)
 
         # Reshape to final kernel format
@@ -380,12 +370,12 @@ class CliffordSteerableConvolution(nn.Module):
             F_in: Input feature map (B, c_in, H)
 
         Returns:
-            F_out: Output feature map (B, c_out, H'
+            F_out: Output feature map (B, c_out, H)
         """
         # Generate learnable steerable kernel
         k = self.kernel_gen()  # (c_out, c_in, k)
 
-        # Apply 3D convolution
+        # Apply 1D convolution
         F_out = F.conv1d(
             F_in, k, stride=self.stride, padding=self.padding, bias=self.bias
         )
@@ -400,6 +390,7 @@ class CliffordSteerableNetwork(pl.LightningModule):
         q: int = 0,
         in_channels: int = 1,
         hidden_channels: List[int] = [16, 32, 64],
+        classifier: List[int] = [512],
         out_channels: int = 10,
         n_shells: int = 3,
         kernel_size: int = 3,
@@ -439,13 +430,15 @@ class CliffordSteerableNetwork(pl.LightningModule):
 
         # Global pooling and classifier
         self.pool = nn.AdaptiveAvgPool1d(1)
-        # TODO: Check if this additional Linear layer is necessary
+
         self.classifier = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(prev_c, 512),
-            nn.ReLU(),
-            nn.Linear(512, out_channels),
         )
+        for hidden in classifier:
+            self.classifier.append(nn.Linear(prev_c, hidden))
+            self.classifier.append(nn.ReLU())
+            prev_c = hidden
+        self.classifier.append(nn.Linear(prev_c, out_channels))
 
         # I have to use torchmetrics for macro recall, because it cannot be computed
         # from batches, and sklearn's recall_score doesn't work with accumulating the

@@ -64,7 +64,7 @@ class GPULoader:
         y = torch.cat([sample[1] for sample in samples]).long()
         
         g = None
-        if samples[0][2] is not None:
+        if len(samples[0]) > 2:
             g = torch.cat([sample[2] for sample in samples])
 
         self.batch_size = batch_size

@@ -1,0 +1,50 @@
+# Search space for hpo.py.  Key = Hydra config path of the parameter to tune.
+#
+#   type: float        low, high, [log: true], [step]
+#   type: int          low, high, [log: true], [step]
+#   type: categorical  values: [...]       (values may be lists, bools, null, strings)
+#
+# Optional per-entry keys:
+#   enabled: false     skip this parameter (keeps the value from the config files)
+#   also: [paths]      write the same sampled value to extra config paths
+#   cap_by: path       upper bound = value sampled for another (earlier) parameter
+#
+# Parameters not listed here keep their value from configs/*.yaml / command-line overrides.
+# Delete or comment out an entry (or set enabled: false) to freeze it.
+
+# ---- optimisation ---------------------------------------------------------
+model.learning_rate:
+  type: float
+  low: 3.0e-4
+  high: 1.0e-2
+  log: true
+
+model.weight_decay:
+  type: float
+  low: 1.0e-3
+  high: 1.0e-1
+  log: true
+
+# ---- architecture ---------------------------------------------------------
+model.p:
+  type: int
+  low: 2
+  high: 4
+
+model.q:
+  type: int
+  low: 0
+  high: 1
+
+model.hidden_channels:
+  type: categorical
+  values: [[32, 64], [64, 128], [32, 64, 128], [32, 64, 64, 128]]
+
+model.classifier:
+  type: categorical
+  values: [[512], [256, 512], [128, 256, 512]]
+
+model.n_shells:
+  type: int
+  low: 2
+  high: 5

@@ -10,17 +10,15 @@ batch_size: 256
 seed: 42
   
 train:
-  epochs: 50
-  learning_rate: 3e-3
+  epochs: 25
   out_channels: 91
   normalize_data: true
-  weight_decay: 5e-2
   gradient_clip_val: null
   loss:
     name: cross-entropy
     label_smoothing: 0.1
   early_stopping:
-    patience: 3
+    patience: 5
     mode: min
     monitor: val_loss
 
