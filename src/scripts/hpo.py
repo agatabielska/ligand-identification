@@ -409,7 +409,7 @@ class MergedTensorLoader:
         order = torch.randperm(len(self.y), device=self.y.device)
         for i in range(len(self)):
             idx = order[i * self.batch_size : (i + 1) * self.batch_size]
-            yield self.x[idx], self.y[idx], self.g[idx]
+            yield (self.x[idx], self.y[idx], self.g[idx]) if self.g is not None else (self.x[idx], self.y[idx])
 
 
 _TENSOR_ATTRS = {
@@ -419,18 +419,25 @@ _TENSOR_ATTRS = {
 }
 
 
-def _loader_tensors(loader) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def _loader_tensors(loader) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor] | tuple[torch.Tensor, torch.Tensor]:
     """Pull (x, y, g) out of a tensor-holding loader (e.g. GPULoader)."""
     found = {}
+    isG = True
     for key, candidates in _TENSOR_ATTRS.items():
         attr = next((c for c in candidates if torch.is_tensor(getattr(loader, c, None))), None)
         if attr is None:
-            raise AttributeError(
-                f"{type(loader).__name__} has no tensor for '{key}' "
-                f"(tried {candidates}). Its attributes: {sorted(vars(loader))}."
-            )
+            if key in ("x", "y"):
+                raise AttributeError(
+                    f"{type(loader).__name__} has no tensor for '{key}' "
+                    f"(tried {candidates}). Its attributes: {sorted(vars(loader))}."
+                )
+            else:
+                print(f"Warning: {type(loader).__name__} has no tensor for '{key}' (tried {candidates})")
+                isG = False
+                continue
         found[key] = getattr(loader, attr)
-    return found["x"], found["y"], found["g"]
+        
+    return (found["x"], found["y"], found["g"]) if isG else (found["x"], found["y"])
 
 
 def _merge_torch_loaders(train_loader: DataLoader, val_loader: DataLoader) -> DataLoader:
@@ -447,17 +454,23 @@ def _merge_torch_loaders(train_loader: DataLoader, val_loader: DataLoader) -> Da
 
 
 def _merge_tensor_loaders(train_loader, val_loader) -> MergedTensorLoader:
-    xt, yt, gt = _loader_tensors(train_loader)
-    xv, yv, gv = _loader_tensors(val_loader)
+    xt, yt, *restt = _loader_tensors(train_loader)
+    xv, yv, *restv = _loader_tensors(val_loader)
     device = xt.device
+    
 
     x = torch.cat([xt, xv.to(device)])
     y = torch.cat([yt.view(-1), yv.view(-1).to(device)])
-    g = torch.cat([gt, gv.to(device)])
+    
+    isG = bool(restt and restv)
+    if isG:
+        gt, gv = restt[0], restv[0]
+        g = torch.cat([gt, gv.to(device)])
 
     batch_size = getattr(train_loader, "batch_size", None) or len(next(iter(train_loader))[1])
     print(f"Merged train+val: {len(y)} samples, batch_size={batch_size}, device={device}")
-    return MergedTensorLoader(x, y, g, int(batch_size))
+    
+    return MergedTensorLoader(x, y, g, int(batch_size)) if isG else MergedTensorLoader(x, y, None, int(batch_size))
 
 
 def merge_loaders(train_loader, val_loader):
@@ -482,7 +495,25 @@ def refit_spectral_statistics(model, loader) -> None:
     model.set_class_counts(torch.bincount(y, minlength=model.num_classes))
     model.global_mean.copy_(g.mean(0))
     model.global_std.copy_(g.std(0).clamp_min(1e-6))
+    
+def clifford_final_configure_optimizers(model):
+        optimizer = torch.optim.AdamW(
+            model.parameters(), lr=model.learning_rate, weight_decay=model.weight_decay
+        )
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            factor=model.scheduler_factor,
+            patience=model.scheduler_patience,
+        )
 
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "monitor": "train_loss",
+            },
+        }
 
 def _final_epochs(args, best: dict[str, Any]) -> int:
     """Explicit --final-epochs, else the best tuning epoch (0-indexed) + 1, else trial_epochs."""
@@ -512,6 +543,8 @@ def run_final(args, search: Search, base_overrides: list[str], output_dir: Path)
     merged_loader = merge_loaders(train_loader, val_loader)
     if cfg.model.type == "spectral":
         refit_spectral_statistics(model, merged_loader)
+    if cfg.model.type == "clifford":
+        model.configure_optimizers = lambda: clifford_final_configure_optimizers(model)
 
     run_name = f"final-{args.study_name}"
     checkpoint_dir = Path(cfg.paths.model_checkpoint) / run_name
