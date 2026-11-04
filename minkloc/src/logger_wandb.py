@@ -26,6 +26,9 @@ def compute_metrics(preds: torch.Tensor, target: torch.Tensor) -> dict:
     """Compute all metrics and return as a flat dict with 'eval/' prefix."""
     target_idx  = target.long()
     num_classes = preds.shape[1]
+    ranks = (preds.argsort(dim=1, descending=True) == target_idx.unsqueeze(1)).nonzero(
+        as_tuple=False
+    )[:, 1] + 1
 
     top5_acc  = torchmetrics.functional.accuracy(preds, target_idx, top_k=5,  num_classes=num_classes) if num_classes > 5  else 1.0
     top10_acc = torchmetrics.functional.accuracy(preds, target_idx, top_k=10, num_classes=num_classes) if num_classes > 10 else 1.0
@@ -43,6 +46,7 @@ def compute_metrics(preds: torch.Tensor, target: torch.Tensor) -> dict:
         "eval/micro_recall":    to_float(torchmetrics.functional.recall(preds, target_idx, average="micro", num_classes=num_classes)),
         "eval/micro_precision": to_float(torchmetrics.functional.precision(preds, target_idx, average="micro", num_classes=num_classes)),
         "eval/micro_f1":        to_float(torchmetrics.functional.f1_score(preds, target_idx, average="micro", num_classes=num_classes)),
+        "eval/mean_rank":       to_float(ranks.float().mean()),
     }
 
 
@@ -143,3 +147,6 @@ def log_epoch(
         metrics = {k.replace("eval/", f"{prefix}/", 1): v for k, v in metrics.items()}
     metrics["epoch"] = epoch
     run.log(metrics)
+    run.summary.update(
+        {key: value for key, value in metrics.items() if key != "epoch"}
+    )

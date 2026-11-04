@@ -168,7 +168,7 @@ If it fails, repair/restart the host GPU installation before starting Docker.
 Use a Forge key and endpoint:
 
 ```bash
-export WANDB_BASE_URL=https://forge.coreweave.com/wandb
+export WANDB_BASE_URL=https://api.wandb.ai
 wandb login --relogin --host https://forge.coreweave.com/wandb
 wandb status
 ```
