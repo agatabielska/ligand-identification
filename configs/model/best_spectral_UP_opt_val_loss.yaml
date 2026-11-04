@@ -1,0 +1,27 @@
+type: spectral
+
+n_shells: 6
+lmax: 6
+r_max: 0.8396367344105831
+n_channels: 3
+n_mix: 8
+pow_mode: triu
+gram: all
+triples: nonzero
+bispec_lmax: 6
+reflection_equivariant: false
+norm: batch
+in_bn: true
+use_globals: all
+glob_dim: 128
+glob_noise: 0.0023487151929853303
+widths: [256, 128]
+head_dropout: 0.40994708625843
+feat_dropout: 0.15139762602157533
+point_dropout: 0.26439989465224867
+density_noise: 0.08673133577227507
+clean_probability: 0.2982292840179619
+label_smoothing: 0.022028748410265697
+learning_rate: 0.0017216691742318662
+weight_decay: 0.07289175871280311
+warmup_frac: 0.08315800901405834

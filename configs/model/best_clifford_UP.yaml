@@ -1,0 +1,10 @@
+type: clifford
+p: 4
+q: 0
+in_channels: 3
+hidden_channels: [64, 128]
+classifier: [512]
+n_shells: 2
+kernel_size: 3
+learning_rate: 0.009597810662980068
+weight_decay: 0.00394472028310161
