@@ -1,0 +1,96 @@
+from pathlib import Path
+
+import hydra
+from omegaconf import DictConfig, OmegaConf
+
+from src.scripts.train import run_training
+from src.utils.experiment_cli import parse_experiment_args
+from src.utils.set_seed import set_seed
+
+
+ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_CONFIG = ROOT / "configs" / "config.yaml"
+MODEL_CONFIG = ROOT / "configs" / "model" / "spectral.yaml"
+MACHINE_CONFIG = ROOT / "configs" / "machine" / "hpc.yaml"
+EXPERIMENT_CONFIG = Path(__file__).with_name("config.yaml")
+EXPERIMENT_ARGS = parse_experiment_args()
+
+
+def select_experiment(
+    experiment_cfg: DictConfig, experiment_number: str, run_id: str | None = None
+) -> DictConfig:
+    """Select a named ensemble definition and attach its reproducible run ID."""
+    if not experiment_number:
+        raise ValueError("Provide --experiment-number, for example experiment1.")
+    experiments = experiment_cfg.get("experiments", {})
+    if experiment_number not in experiments:
+        available = ", ".join(experiments.keys())
+        raise ValueError(
+            f"Unknown experiment {experiment_number!r}; expected one of: {available}"
+        )
+    selected = OmegaConf.create(OmegaConf.to_container(experiment_cfg, resolve=False))
+    selected.pop("experiments")
+    selected = OmegaConf.merge(selected, experiments[experiment_number])
+    selected.experiment_number = experiment_number
+    selected.run_id = run_id or selected.get("run_id") or experiment_number
+    return selected
+
+
+def build_config(model_override: DictConfig) -> DictConfig:
+    """Merge one experiment entry into the default spectral e3nn config."""
+    override = OmegaConf.to_container(model_override, resolve=True)
+    if not isinstance(override, dict):
+        raise ValueError("Each entry in models must be a mapping.")
+
+    name = override.pop("name", None)
+    data_path = override.pop("data_path", None)
+    num_sample_points = override.pop("num_sample_points", None)
+    architecture = override.pop("architecture", "spectral")
+    if architecture != "spectral":
+        raise ValueError(f"{name or 'Model'} must use architecture=spectral.")
+
+    cfg = OmegaConf.merge(
+        OmegaConf.load(DEFAULT_CONFIG),
+        {"model": OmegaConf.load(MODEL_CONFIG), "machine": OmegaConf.load(MACHINE_CONFIG)},
+    )
+    if data_path is not None:
+        cfg.paths.data_dir = str((ROOT / data_path).resolve()) if not Path(data_path).is_absolute() else data_path
+    if name is not None:
+        cfg.wandb.run_name = name
+
+    model_fields = set(OmegaConf.to_container(cfg.model, resolve=True))
+    model_values = {key: value for key, value in override.items() if key in model_fields}
+    unknown = set(override) - model_fields
+    if unknown:
+        raise ValueError(f"Unsupported model override(s): {', '.join(sorted(unknown))}")
+    tags = [
+        f"dataset:{Path(cfg.paths.data_dir).name}",
+        f"model:{name or 'unnamed'}",
+    ]
+    if num_sample_points is not None:
+        tags.append(f"points:{num_sample_points}")
+    return OmegaConf.merge(cfg, {"model": model_values, "wandb": {"tags": tags}})
+
+
+@hydra.main(config_path=".", config_name="config", version_base=None)
+def main(experiment_cfg: DictConfig) -> None:
+    experiment_cfg = select_experiment(
+        experiment_cfg, EXPERIMENT_ARGS.experiment_number, EXPERIMENT_ARGS.run_id
+    )
+    run_id = experiment_cfg.run_id
+    print(f"Training ensemble run: {run_id}")
+    for model_cfg in experiment_cfg.models:
+        cfg = build_config(model_cfg)
+        cfg.wandb.project = experiment_cfg.wandb.project
+        cfg.wandb.experiment = experiment_cfg.wandb.experiment
+        cfg.train.loss = OmegaConf.create(
+            OmegaConf.to_container(experiment_cfg.loss, resolve=True)
+        )
+        cfg.wandb.run_name = f"{run_id}-{cfg.wandb.run_name}"
+        cfg.wandb.tags = [f"run:{run_id}", cfg.wandb.experiment, *list(cfg.wandb.tags)]
+        set_seed(cfg.seed)
+        run_training(cfg)
+
+
+if __name__ == "__main__":
+    main()

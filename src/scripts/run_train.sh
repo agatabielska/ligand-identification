@@ -24,7 +24,14 @@
 # uv run -m src.scripts.train paths.data_dir=data/unthresholded_transform_probabilistic model=clifford wandb.run_name=unthresholded_probabilistic_clifford_flat_input_scalarshell_fixed
 
 
-# uv run -m src.scripts.train paths.data_dir=data/unthresholded_transform_probabilistic model=spectral wandb.run_name=UP_SOTA
+uv run -m src.scripts.train paths.data_dir=data/unthresholded_transform_probabilistic model=spectral wandb.run_name=UP_SOTA
+
+# loss experiments
+# uv run -m src.experiments.loss_experiments.e3nn_loss_experiments
+
+# build e3nn model with ensemble of 3 models
+# uv run -m src.experiments.ensemble3models.train_3_models --experiment-number experiment1 --run-id experiment1-run1
+# uv run -m src.experiments.ensemble3models.train_head --experiment-number experiment1 --run-id experiment1-run1
 
 
 # uv run -m src.scripts.train paths.data_dir=data/thresholded_transform_probabilistic model=clifford wandb.run_name=UPC_SOTA

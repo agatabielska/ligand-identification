@@ -33,7 +33,7 @@ class BlobDataset(Dataset):
 
         for class_dir in class_dirs:
             label = self.label_to_idx[class_dir.name]
-            for file in class_dir.glob("*.npz"):
+            for file in sorted(class_dir.glob("*.npz")):
                 self.samples.append((file, label))
         if self.cache:
             self.cached_data = []

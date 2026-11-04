@@ -244,6 +244,12 @@ if __name__ == "__main__":
         help="Path to the output folder where preprocessed data will be saved.",
     )
     parser.add_argument(
+        "--filtered-output-folder",
+        type=str,
+        default=None,
+        help="Writable directory for the filtered intermediate dataset.",
+    )
+    parser.add_argument(
         "--n-splits",
         type=int,
         default=5,
@@ -275,10 +281,19 @@ if __name__ == "__main__":
         raise ValueError(f"filter_cryoem_classes.sh not found at {filter_script}")
     else:
         import subprocess
-        subprocess.run(["bash", str(filter_script), args.raw_data_dir], check=True)
+        filter_args = ["bash", str(filter_script), args.raw_data_dir]
+        if args.filtered_output_folder:
+            filter_args.append(args.filtered_output_folder)
+        subprocess.run(filter_args, check=True)
         print("Finished running filter_cryoem_classes.sh.")
         
-    filtered_data_dir = Path(f"data/filtered_{args.raw_data_dir}")
+    raw_data_dir = Path(args.raw_data_dir)
+    if raw_data_dir.is_absolute():
+        filtered_data_dir = Path(
+            args.filtered_output_folder or f"{raw_data_dir}_filtered"
+        )
+    else:
+        filtered_data_dir = Path(f"data/filtered_{args.raw_data_dir}")
     if not filtered_data_dir.exists():
         raise ValueError(f"Filtered data directory not found: {filtered_data_dir}. Please run filter_cryoem_classes.sh to create it.")
 

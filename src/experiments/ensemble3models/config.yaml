@@ -1,0 +1,81 @@
+wandb:
+  project: ligand-identification-ensembles
+
+# Leave unset to use the experiment number as the stable run/checkpoint ID.
+run_id: null
+
+loss:
+  name: baseline
+  label_smoothing: 0.1
+
+ensemble:
+  name: stacked-head
+  epochs: 50
+  patience: 10
+  unfreeze_epoch: 10
+  learning_rate: 0.001
+  backbone_lr_scale: 0.1
+  weight_decay: 0.00005
+  feature_noise: 0.5
+  loss: ${loss}
+
+experiments:
+  # control: same datasets, same architectures
+  experiment1:
+    wandb:
+      experiment: experiment1
+    models:
+      - name: model1
+        lmax: 6
+        data_path: /home/abielska/ligand-identification/data/unthresholded_transform_probabilistic
+      - name: model2
+        lmax: 6
+        data_path: /home/abielska/ligand-identification/data/unthresholded_transform_probabilistic
+      - name: model3
+        lmax: 6
+        data_path: /home/abielska/ligand-identification/data/unthresholded_transform_probabilistic
+
+  # different lmax, different datasets
+  experiment2:
+    wandb:
+      experiment: experiment2
+    models:
+      - name: model1
+        lmax: 4
+        data_path: /home/abielska/ligand-identification/data/unthresholded_500_transform_probabilistic
+      - name: model2
+        lmax: 4
+        data_path: /home/abielska/ligand-identification/data/unthresholded_1000_transform_probabilistic
+      - name: model3
+        lmax: 6
+        data_path: /home/abielska/ligand-identification/data/unthresholded_transform_probabilistic
+
+  #different datasets only
+  experiment3:
+    wandb:
+      experiment: experiment3
+    models:
+      - name: model1
+        lmax: 6
+        data_path: /home/abielska/ligand-identification/data/unthresholded_500_transform_probabilistic
+      - name: model2
+        lmax: 6
+        data_path: /home/abielska/ligand-identification/data/unthresholded_1000_transform_probabilistic
+      - name: model3
+        lmax: 6
+        data_path: /home/abielska/ligand-identification/data/unthresholded_transform_probabilistic
+
+  #different lmax only
+  experiment4:
+    wandb:
+      experiment: experiment4
+    models:
+      - name: model1
+        lmax: 4
+        data_path: /home/abielska/ligand-identification/data/unthresholded_transform_probabilistic
+      - name: model2
+        lmax: 4
+        data_path: /home/abielska/ligand-identification/data/unthresholded_transform_probabilistic
+      - name: model3
+        lmax: 6
+        data_path: /home/abielska/ligand-identification/data/unthresholded_transform_probabilistic
