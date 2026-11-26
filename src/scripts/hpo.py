@@ -496,7 +496,7 @@ def refit_spectral_statistics(model, loader) -> None:
     model.global_mean.copy_(g.mean(0))
     model.global_std.copy_(g.std(0).clamp_min(1e-6))
     
-def clifford_final_configure_optimizers(model):
+def radialCNN_final_configure_optimizers(model):
         optimizer = torch.optim.AdamW(
             model.parameters(), lr=model.learning_rate, weight_decay=model.weight_decay
         )
@@ -543,8 +543,8 @@ def run_final(args, search: Search, base_overrides: list[str], output_dir: Path)
     merged_loader = merge_loaders(train_loader, val_loader)
     if cfg.model.type == "spectral":
         refit_spectral_statistics(model, merged_loader)
-    if cfg.model.type == "clifford":
-        model.configure_optimizers = lambda: clifford_final_configure_optimizers(model)
+    if cfg.model.type == "radialCNN":
+        model.configure_optimizers = lambda: radialCNN_final_configure_optimizers(model)
 
     run_name = f"final-{args.study_name}"
     checkpoint_dir = Path(cfg.paths.model_checkpoint) / run_name

@@ -57,7 +57,7 @@ points and uses density-zero rows as padding.
 Data transforms and loaders are in
 [`src/pipeline/data_loader.py`](../../pipeline/data_loader.py).
 The unified entry point is [`src/scripts/train.py`](../../scripts/train.py).
-It contains the config-driven training orchestration for both Clifford and
+It contains the config-driven training orchestration for both radialCNN and
 E3NN. The experiment scripts are separate sweep and reporting tools.
 
 ## Spectral features

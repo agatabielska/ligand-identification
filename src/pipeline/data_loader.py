@@ -15,11 +15,11 @@ from src.pipeline.global_statistics import complete_input_statistics
 MAX_POINTS = 2000
 
 
-def transform_clifford(npz, max_points: int = MAX_POINTS):
+def transform_radialCNN(npz, max_points: int = MAX_POINTS):
     """Prepare coordinate-only input with shape ``(3, max_points)``."""
     indices = npz["indices"].astype(np.float32)
     if indices.shape[0] > max_points:
-        raise ValueError(f"Clifford input contains {indices.shape[0]} points; maximum is {max_points}.")
+        raise ValueError(f"RadialCNN input contains {indices.shape[0]} points; maximum is {max_points}.")
     points = np.zeros((max_points, 3), dtype=np.float32)
     points[: indices.shape[0], :3] = indices
     return torch.from_numpy(points.transpose(1, 0))
@@ -120,8 +120,8 @@ def build_data(cfg: DictConfig, model_type: str):
     """Build train, validation, and test loaders for a configured model."""
     max_points = cfg.data.max_points
     match model_type:
-        case "clifford":
-            transform = partial(transform_clifford, max_points=max_points)
+        case "radialCNN":
+            transform = partial(transform_radialCNN, max_points=max_points)
             global_transform = None
         case "spectral":
             transform = partial(transform_e3nn, max_points=max_points)

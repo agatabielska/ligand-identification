@@ -8,7 +8,7 @@ from pytorch_lightning.callbacks import EarlyStopping, LearningRateMonitor, Mode
 from pytorch_lightning.loggers import WandbLogger
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.models.clifford.model import CliffordSteerableNetwork
+from src.models.radialCNN.model import RadialShellCNN1d
 from src.models.e3nn.configurable_spectral import ConfigurableSpectralModel
 from src.pipeline.data_loader import build_data, validate_data_dir
 from src.utils.set_seed import set_seed
@@ -43,16 +43,16 @@ def build_spectral_training(cfg: DictConfig):
     return model, loaders
 
 
-def build_clifford_training(cfg: DictConfig):
-    train_loader, validation_loader, test_loader = build_data(cfg, "clifford")
+def build_radialCNN_training(cfg: DictConfig):
+    train_loader, validation_loader, test_loader = build_data(cfg, "radialCNN")
     model_cfg, train_cfg = cfg.model, cfg.train
-    model = CliffordSteerableNetwork(
-        p=model_cfg.p,
-        q=model_cfg.q,
+    model = RadialShellCNN1d(
+        n_pos=model_cfg.n_pos,
+        n_neg=model_cfg.n_neg,
         in_channels=model_cfg.in_channels,
         hidden_channels=model_cfg.hidden_channels,
-        classifier=model_cfg.classifier,
-        out_channels=train_cfg.out_channels,
+        classifier_hidden=model_cfg.classifier_hidden,
+        num_classes=train_cfg.out_channels,
         n_shells=model_cfg.n_shells,
         kernel_size=model_cfg.kernel_size,
         learning_rate=model_cfg.learning_rate,
@@ -63,7 +63,7 @@ def build_clifford_training(cfg: DictConfig):
 
 TRAINING_BUILDERS = {
     "spectral": build_spectral_training,
-    "clifford": build_clifford_training,
+    "radialCNN": build_radialCNN_training,
 }
 
 

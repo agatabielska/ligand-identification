@@ -61,10 +61,10 @@ Train the complete-input scalar variant:
 uv run -m src.scripts.train --config-name config_global_statistics_e3nn
 ```
 
-Train the Clifford model:
+Train the RadialShellCNN1d model:
 
 ```bash
-uv run -m src.scripts.train model=clifford
+uv run -m src.scripts.train model=radialCNN
 ```
 
 Check available configuration values:
