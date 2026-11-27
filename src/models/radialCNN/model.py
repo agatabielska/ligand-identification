@@ -114,23 +114,22 @@ class ChannelMixMLP(nn.Module):
         self.channel_mix = nn.Parameter(torch.randn(c_out, c_in, hidden_dim))
         nn.init.xavier_uniform_(self.channel_mix)
 
-        # Output projection back to feature_dim
-        self.output_proj = nn.Linear(hidden_dim, feature_dim)
+        self.output_proj = nn.Linear(hidden_dim, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
             x: Feature vectors (..., feature_dim)
         Returns:
-            Per-channel-pair features (..., c_out, c_in, feature_dim)
+            Per-channel-pair features (..., c_out, c_in)
         """
         h = self.feature_mlp(x)  # (..., hidden_dim)
 
         # Elementwise gain for each (o, i) pair; no sum over i, so the
         # input-channel axis is kept
-        h = torch.einsum("...h,oih->...oih", h, self.channel_mix)  # (..., c_out, c_in, hidden_dim)
+        h = torch.einsum("...h,oih->...oih", h, self.channel_mix) # (..., c_out, c_in, hidden_dim)
 
-        return self.output_proj(h)  # (..., c_out, c_in, feature_dim)
+        return self.output_proj(h).squeeze(-1) # (..., c_out, c_in)
 
 
 class RadialShellKernel1d(nn.Module):
@@ -170,7 +169,7 @@ class RadialShellKernel1d(nn.Module):
             c_out: Output channels
             n_shells: Number of radial shells
             kernel_size: Spatial kernel size
-            n_sampling_points: Points per shell
+            n_points: Points per shell
             hidden_dim: Hidden width of the embedders and ChannelMixMLPs
         """
         super().__init__()
@@ -181,7 +180,7 @@ class RadialShellKernel1d(nn.Module):
         self.n_shells = n_shells
         self.kernel_size = kernel_size
 
-        # Width of the latent feature vectors
+        # Width of the latent feature vectors, tied to the number of +1/-1 entries in the metric
         self.feature_dim = 2 ** (n_pos + n_neg)
 
         # Learnable radii for each shell
@@ -239,14 +238,13 @@ class RadialShellKernel1d(nn.Module):
         """
         device = self.metric.device
 
-        # Create spatial grid for kernel
+        # Tap offsets from the kernel center
         offsets = self._kernel_offsets(device)
 
         # Initialize accumulated kernel
         k_accum = torch.zeros(
             self.c_out,
             self.c_in,
-            self.feature_dim,
             self.kernel_size,
             device=device,
         )
@@ -256,28 +254,24 @@ class RadialShellKernel1d(nn.Module):
             r = self.radii[shell_idx]
 
             # Scalar and unit vector at each shell point
-            s_n, v_n = self.scalar_shells[shell_idx](self.metric, r)  # (n_points,), (n_points, n_pos + n_neg)
+            s, v = self.scalar_shells[shell_idx](self.metric, r)  # (n_points,), (n_points, n_pos + n_neg)
 
             # Embed (scalar, unit vector) pairs as feature vectors
-            sv_concat = torch.cat([s_n.unsqueeze(-1), v_n], dim=-1)  # (n_points, 1 + n_pos + n_neg)
-            x_n = self.embedders[shell_idx](sv_concat)  # (n_points, feature_dim)
+            sv = torch.cat([s.unsqueeze(-1), v], dim=-1)  # (n_points, 1 + n_pos + n_neg)
+            point_feats = self.embedders[shell_idx](sv)  # (n_points, feature_dim)
 
             # Mean-pool over the shell points
-            x_n_agg = x_n.mean(dim=0)  # (feature_dim,)
+            shell_feat = point_feats.mean(dim=0)  # (feature_dim,)
 
             # Per-(output, input) channel features for this shell
-            k_n = self.channel_mlps[shell_idx](x_n_agg)  # (c_out, c_in, feature_dim)
+            shell_k = self.channel_mlps[shell_idx](shell_feat)  # (c_out, c_in, feature_dim)
 
-            # Apply learnable mask
-            mask = self._shell_mask(offsets, r, shell_idx)
-            k_accum += self.shell_weights[shell_idx] * k_n.unsqueeze(-1) * mask
-
-        # k_accum shape: (c_out, c_in, feature_dim, k)
-        # Average over feature_dim to get a standard conv kernel
-        k_reduced = k_accum.mean(dim=2)  # (c_out, c_in, k)
+            # Gaussian ring (only r is learnable)
+            ring = self._shell_ring(offsets, r, shell_idx)
+            k_accum += self.shell_weights[shell_idx] * shell_k.unsqueeze(-1) * ring
 
         # Flatten (c_out, c_in) into channels for the head
-        k_reshaped = k_reduced.reshape(
+        k_reshaped = k_accum.reshape(
             1,
             self.c_out * self.c_in,
             self.kernel_size
@@ -293,32 +287,27 @@ class RadialShellKernel1d(nn.Module):
         return k_final
 
     def _kernel_offsets(self, device):
-        """Create coordinate grid for kernel positions."""
-        coords = torch.arange(self.kernel_size, device=device)
-        grid = torch.stack(
-            torch.meshgrid(coords, indexing="ij"), dim=-1
-        )
-        center = self.kernel_size // 2
-        grid = grid - center  # Center at origin
-        return grid.float()
+        """Signed tap offsets from the kernel center, shape (k,)."""
+        k = self.kernel_size
+        return (torch.arange(k, device=device) - k // 2).float()
 
-    def _shell_mask(
-        self, offsets: torch.Tensor, r: float, shell_idx: int
+    def _shell_ring(
+        self, offsets: torch.Tensor, r: torch.Tensor, shell_idx: int
     ):
         """Gaussian ring over kernel offsets, centered at radius r.
 
         The width is fixed at 0.5 + 0.2 * shell_idx; only r is learnable.
         """
         # Distance from center
-        dist = torch.norm(offsets, dim=-1)
+        dist = offsets.abs()  # (k,)
 
         # Gaussian ring around radius r
-        mask = torch.exp(-((dist - r) ** 2) / (2.0 * (0.5 + shell_idx * 0.2) ** 2))
+        ring = torch.exp(-((dist - r) ** 2) / (2.0 * (0.5 + shell_idx * 0.2) ** 2))
 
-        # (1, 1, 1, k): broadcasts over c_out, c_in and feature_dim
-        mask = mask.unsqueeze(0).unsqueeze(0).unsqueeze(0)
+        # (1, 1, k): broadcasts over c_out, c_in
+        ring = ring.unsqueeze(0).unsqueeze(0)
 
-        return mask
+        return ring
 
 
 class RadialShellConv1d(nn.Module):
@@ -349,7 +338,7 @@ class RadialShellConv1d(nn.Module):
             kernel_size: Kernel size
             stride: Convolution stride
             padding: Padding size
-            n_sampling_points: Sampling points per shell
+            n_points: Sampling points per shell
             hidden_dim: Hidden width of the kernel generator's networks
         """
         super().__init__()
@@ -395,15 +384,15 @@ class RadialShellCNN1d(pl.LightningModule):
     """
     1D classifier: stacked RadialShellConv1d blocks, global average pooling and an MLP head.
 
-    Input (B, in_channels, L) -> logits (B, out_channels).
+    Input (B, in_channels, L) -> logits (B, num_classes).
 
     Args:
         n_pos, n_neg: Number of +1 / -1 entries on the diagonal of the metric
             used inside each ScalarShell
         in_channels: Channels of the input sequence
         hidden_channels: Output channels of each RadialShellConv1d block
-        classifier: Hidden widths of the MLP head
-        out_channels: Number of classes
+        classifier_hidden: Hidden widths of the MLP head
+        num_classes: Number of classes
         n_shells: Radial shells per kernel
         kernel_size: Kernel size of every block
         learning_rate, weight_decay: AdamW settings
@@ -426,6 +415,7 @@ class RadialShellCNN1d(pl.LightningModule):
         scheduler_patience: int = 5,
     ):
         super().__init__()
+        self.save_hyperparameters()
         self.num_classes = num_classes
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
@@ -509,7 +499,7 @@ class RadialShellCNN1d(pl.LightningModule):
         metrics = compute_metrics(y_hat, y, self.num_classes)
 
         preds = y_hat.argmax(dim=1)
-        target = y.squeeze()
+        target = y.view(-1)
         self.val_recall.update(preds, target)
 
         self.log("val_loss", metrics["loss"])
@@ -530,7 +520,7 @@ class RadialShellCNN1d(pl.LightningModule):
         metrics = compute_metrics(y_hat, y, self.num_classes)
 
         preds = y_hat.argmax(dim=1)
-        target = y.squeeze()
+        target = y.view(-1)
         self.test_recall.update(preds, target)
 
         self.log("test_loss", metrics["loss"])
@@ -546,13 +536,10 @@ class RadialShellCNN1d(pl.LightningModule):
         self.test_recall.reset()
 
     def on_before_optimizer_step(self, optimizer):
-        # Compute and log the total gradient norm
-        total_norm = 0.0
-        for p in self.parameters():
-            if p.grad is not None:
-                total_norm += p.grad.data.norm(2).item() ** 2
-        total_norm = total_norm**0.5
-        self.log("grad_norm", total_norm, on_step=True)
+        grads = [p.grad for p in self.parameters() if p.grad is not None]
+        if grads:
+            total_norm = torch.linalg.vector_norm(torch.stack([torch.linalg.vector_norm(g) for g in grads]))
+            self.log("grad_norm", total_norm, on_step=True)
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(
