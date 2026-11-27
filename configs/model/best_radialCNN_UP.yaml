@@ -1,10 +1,10 @@
 type: radialCNN
-n_pos: 4
+n_pos: 2
 n_neg: 0
 in_channels: 3
 hidden_channels: [64, 128]
 classifier_hidden: [512]
-n_shells: 2
+n_shells: 3
 kernel_size: 3
-learning_rate: 0.009597810662980068
-weight_decay: 0.00394472028310161
+learning_rate: 0.004185759706993087
+weight_decay: 0.0045549791655907865
