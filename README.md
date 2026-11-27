@@ -168,6 +168,22 @@ uv run -m src.experiments.spectral_experiments \
   --output-dir results/raw_npz_scalars
 ```
 
+## Export predictions for all HPO checkpoints
+
+After each checkpoint directory contains exactly one `final-epoch=*.ckpt`,
+export its per-sample predictions on the matching test set:
+
+```bash
+uv run -m src.scripts.evaluate_checkpoints
+```
+
+The script writes one CSV per checkpoint to
+`results/checkpoint_predictions/`, named after its checkpoint directory. Each
+CSV contains the sample identifier, true and predicted class, predicted-class
+probability, and the 1-based rank of the true class. Override the checkpoint,
+data, or output roots with `--checkpoints-dir`, `--data-root`, and
+`--output-dir`.
+
 ## Visualize blobs
 
 ```bash
