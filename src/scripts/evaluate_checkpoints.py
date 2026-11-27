@@ -55,7 +55,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoints-dir", type=Path, default=ROOT / "checkpoints")
     parser.add_argument("--data-root", type=Path, default=ROOT / "data")
     parser.add_argument(
-        "--output-dir", type=Path, default=ROOT / "results" / "checkpoint_predictions"
+        "--output-dir", type=Path, default=ROOT / "checkpoint_predictions"
     )
     return parser.parse_args()
 
