@@ -1,0 +1,23 @@
+{
+  "prediction_file": "final-hpo-radialCNN-TU.csv",
+  "sample_count": 13172,
+  "class_count": 91,
+  "correct_count": 7564,
+  "incorrect_count": 5608,
+  "accuracy": 0.5742484057090799,
+  "macro_precision": 0.2675812330345143,
+  "macro_recall": 0.19754658491406688,
+  "macro_f1": 0.19699115279346804,
+  "mean_confidence": 0.6024982169589536,
+  "mean_confidence_when_correct": 0.7031330429667647,
+  "mean_confidence_when_wrong": 0.46676322695840355,
+  "expected_calibration_error_10_bins": 0.030931781800936076,
+  "mean_true_class_rank": 3.3220467658669905,
+  "median_true_class_rank": 1.0,
+  "true_class_rank_at_most_1": 0.5742484057090799,
+  "true_class_rank_at_most_3": 0.7912238080777406,
+  "true_class_rank_at_most_5": 0.8710901913149104,
+  "true_class_rank_at_most_10": 0.9374430610385667,
+  "most_common_predicted_class": "NAG",
+  "most_common_true_class": "NAG"
+}

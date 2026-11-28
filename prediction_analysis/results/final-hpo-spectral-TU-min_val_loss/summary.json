@@ -1,0 +1,23 @@
+{
+  "prediction_file": "final-hpo-spectral-TU-min_val_loss.csv",
+  "sample_count": 13172,
+  "class_count": 91,
+  "correct_count": 9713,
+  "incorrect_count": 3459,
+  "accuracy": 0.73739750986942,
+  "macro_precision": 0.5274067873119586,
+  "macro_recall": 0.4209531935692321,
+  "macro_f1": 0.4287720140351963,
+  "mean_confidence": 0.7519557153126759,
+  "mean_confidence_when_correct": 0.839526275615239,
+  "mean_confidence_when_wrong": 0.5060543414419633,
+  "expected_calibration_error_10_bins": 0.014558205443255933,
+  "mean_true_class_rank": 2.21986030974795,
+  "median_true_class_rank": 1.0,
+  "true_class_rank_at_most_1": 0.73739750986942,
+  "true_class_rank_at_most_3": 0.8887792286668691,
+  "true_class_rank_at_most_5": 0.9317491648952323,
+  "true_class_rank_at_most_10": 0.9682660188278166,
+  "most_common_predicted_class": "NAG",
+  "most_common_true_class": "NAG"
+}

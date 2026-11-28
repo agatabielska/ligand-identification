@@ -1,0 +1,23 @@
+{
+  "prediction_file": "final-hpo-spectral-UP.csv",
+  "sample_count": 13172,
+  "class_count": 91,
+  "correct_count": 10758,
+  "incorrect_count": 2414,
+  "accuracy": 0.8167324627998785,
+  "macro_precision": 0.6673048254773071,
+  "macro_recall": 0.5457126873781469,
+  "macro_f1": 0.5722602448113648,
+  "mean_confidence": 0.7247943171559339,
+  "mean_confidence_when_correct": 0.7847126263104965,
+  "mean_confidence_when_wrong": 0.4577681490180778,
+  "expected_calibration_error_10_bins": 0.09193814564394462,
+  "mean_true_class_rank": 2.7341330094139082,
+  "median_true_class_rank": 1.0,
+  "true_class_rank_at_most_1": 0.8167324627998785,
+  "true_class_rank_at_most_3": 0.9252960825994534,
+  "true_class_rank_at_most_5": 0.950425144245369,
+  "true_class_rank_at_most_10": 0.9716823565138172,
+  "most_common_predicted_class": "NAG",
+  "most_common_true_class": "NAG"
+}
