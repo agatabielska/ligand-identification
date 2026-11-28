@@ -75,21 +75,19 @@ For example, run the coordinate-only RadialShellCNN on the default dataset:
 uv run -m src.scripts.train model=radialCNN
 ```
 
-Spectral presets include `best_spectral_UP`, `best_spectral_TP`, and
-`best_spectral_TU` for unthresholded probabilistic, thresholded probabilistic,
-and thresholded uniform data. `best_spectral_UP_opt_val_loss` is the
-validation-loss preset. To prepare a different point budget, pass
-`--max-points` to preprocessing and use the matching dataset path and
-`data.max_points` when training. For 10k or more points, set
-`machine.use_gpu_loader=false`; for 25k, reduce `machine.batch_size` to 64.
+### Model presets in `configs/model/`
 
-Example: train the 4k UP preset:
+Use the YAML filename (without `.yaml`) as the `model` override. `UP`, `TP`,
+and `TU` stand for unthresholded probabilistic, thresholded probabilistic, and
+thresholded uniform data.
 
-```bash
-uv run -m src.scripts.train model=best_spectral_UP \
-  paths.data_dir=data/unthresholded_transform_probabilistic_4000pts \
-  data.max_points=4000
-```
+| Model family | Validation-accuracy presets | Validation-loss presets |
+|---|---|---|
+| Spectral | `best_spectral_UP`, `best_spectral_TP`, `best_spectral_TU` | `best_spectral_UP_opt_val_loss` |
+| RadialShellCNN | `best_radialCNN_UP`, `best_radialCNN_TP`, `best_radialCNN_TU` | `best_radialCNN_UP_opt_val_loss`, `best_radialCNN_TP_opt_val_loss`, `best_radialCNN_TU_opt_val_loss` |
+
+`configs/hpo/` defines the search spaces. Unsuffixed presets maximize
+`val_acc`. Presets with `_opt_val_loss` minimize validation cross-entropy.
 
 ## Ensembles
 
@@ -131,9 +129,10 @@ Analyze all prediction CSVs and write a separate report folder for each:
 uv run python prediction_analysis/analyze_checkpoint_predictions.py
 ```
 
-Reports are saved under `prediction_analysis/results/` and summarize class
-performance, confusions, confidence, and true-class rank. Use repeated
-`--csv <filename>` options to select inputs.
+Reports are saved under `prediction_analysis/results/` and include accuracy
+and mean true-class rank alongside class performance, confusions, and
+confidence. These metrics can favor different runs; lower mean rank is better.
+Use repeated `--csv <filename>` options to select inputs.
 
 ## Visualization
 
