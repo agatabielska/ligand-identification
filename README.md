@@ -1,9 +1,10 @@
-# Ligand identification
+<h1 align="center">Ligand identification</h1>
+<p align="center">An equivariant e3nn spectral model and a 1D radial-shell CNN, trained with probabilistic sampling and compared with MinkLoc.</p>
 
 ## Setup
 
-Install [`uv`](https://docs.astral.sh/uv/getting-started/installation/), then
-install the project dependencies:
+Install [`uv`](https://docs.astral.sh/uv/getting-started/installation/) and
+sync the project dependencies:
 
 ```bash
 uv sync
@@ -20,7 +21,9 @@ data/unthresholded_transform_probabilistic/
 
 ## Prepare data
 
-Download and preprocess the Cryo-EM blobs:
+### Thresholded data
+
+Download and preprocess the thresholded blobs:
 
 ```bash
 ./src/scripts/download_cryoem_blobs.sh
@@ -30,7 +33,9 @@ uv run -m src.scripts.preprocess \
   --transform-stack probabilistic
 ```
 
-For unthresholded blobs:
+### Unthresholded data
+
+Trim the unthresholded blobs, then preprocess them with probabilistic sampling:
 
 ```bash
 uv run -m src.scripts.trim_unthresholded
@@ -40,106 +45,57 @@ uv run -m src.scripts.preprocess \
   --transform-stack probabilistic
 ```
 
-## Train one model
+## Run the default model
 
-The default command trains the strict 2,000-point spectral model:
-
-```bash
-uv run -m src.scripts.train
-```
-
-Change model and training values in the YAML files under `configs/` before
-starting a run. The command remains:
+The default configuration (`configs/config.yaml`) trains the spectral model
+with 2,000 points. It reads `data/unthresholded_transform_probabilistic/`,
+which must contain `train/`, `val/`, and `test/` splits. Start training with:
 
 ```bash
 uv run -m src.scripts.train
 ```
 
-Train the complete-input scalar variant:
+## Configure other runs
 
-```bash
-uv run -m src.scripts.train --config-name config_global_statistics_e3nn
-```
+Use Hydra overrides on the training command, or edit the YAML presets in
+`configs/`. The main settings are:
 
-Train the RadialShellCNN1d model:
+| Setting | Examples | Purpose |
+|---|---|---|
+| `model` | `spectral`, `radialCNN` | Select the model family |
+| `paths.data_dir` | `data/unthresholded_transform_probabilistic` | Select dataset |
+| `data.max_points` | `2000`, `4000`, `10000`, `25000` | Set the input point budget |
+| `model.use_globals` | `all`, `none` | Enable or disable global features for the spectral model |
+| `train.epochs`, `random_seed` | YAML values or overrides | Control training |
+| `machine.batch_size`, `machine.use_gpu_loader` | YAML values or overrides | Control loading and memory use |
+
+For example, run the coordinate-only RadialShellCNN on the default dataset:
 
 ```bash
 uv run -m src.scripts.train model=radialCNN
 ```
 
-Check available configuration values:
+Spectral presets include `best_spectral_UP`, `best_spectral_TP`, and
+`best_spectral_TU` for unthresholded probabilistic, thresholded probabilistic,
+and thresholded uniform data. `best_spectral_UP_opt_val_loss` is the
+validation-loss preset. To prepare a different point budget, pass
+`--max-points` to preprocessing and use the matching dataset path and
+`data.max_points` when training. For 10k or more points, set
+`machine.use_gpu_loader=false`; for 25k, reduce `machine.batch_size` to 64.
+
+Example: train the 4k UP preset:
 
 ```bash
-uv run -m src.scripts.train --help
+uv run -m src.scripts.train model=best_spectral_UP \
+  paths.data_dir=data/unthresholded_transform_probabilistic_4000pts \
+  data.max_points=4000
 ```
 
-## Point-count experiment
+## Ensembles
 
-Compares 2k / 4k / 10k / 25k points per blob, with global features
-(`model=spectral`) and without (`model=spectral_no_globals`, which is
-`spectral.yaml` with `use_globals: none`).
-
-```bash
-# 1. preprocess all point counts
-for N in 2000 4000 10000 25000; do
-  uv run -m src.scripts.preprocess --raw-data-dir NoThresholdBlobs \
-    --output-folder data/unthresholded --transform-stack probabilistic --max-points $N
-done
-
-# 2. train (10k+: data kept in CPU RAM; 25k: smaller batch)
-for N in 2000 4000 10000 25000; do
-  for M in spectral spectral_no_globals; do
-    BS=256; GPU=true
-    [ $N -ge 10000 ] && GPU=false
-    [ $N -eq 25000 ] && BS=64
-    uv run -m src.scripts.train model=$M data.max_points=$N \
-      paths.data_dir=data/unthresholded_transform_probabilistic_${N}pts \
-      machine.batch_size=$BS machine.use_gpu_loader=$GPU \
-      wandb.run_name=${M}_${N}pts
-  done
-done
-
-```
-
-## Run spectral experiments
-
-Run selected strict 2,000-point presets:
-
-```bash
-uv run -m src.experiments.spectral_experiments \
-  --only r1_gall_bn,r2_bn_m32d,r3_bn_m32t \
-  --seeds 1 \
-  --force
-```
-
-Run the complete preset set:
-
-```bash
-uv run -m src.experiments.spectral_experiments --force
-```
-
-Results are written to `results/best_e2e/`. The runner prints individual
-metrics and validation-selected `POOL all` and `POOL top3` ensemble metrics.
-
-For larger GPU-oriented models while keeping exactly 2,000 points:
-
-```bash
-uv run -m src.experiments.gpu_scaling_experiments \
-  --preset baseline,head-wide,head-deep,mix48,mix64 \
-  --batch-size 256 \
-  --epochs 20 \
-  --force
-```
-
-The sweep starts from the measured `r3_bn_m32t` configuration and expands one
-capacity axis at a time. Available presets include wider/deeper heads,
-additional channel mixing, more radial shells, and a third input channel.
-Results are written to `results/gpu_scaling_2000/`.
-
-## Evaluate a checkpoint ensemble
-
-The checkpoint ensemble evaluator expects run directories below `checkpoints/`,
-each containing `model-*.ckpt` files:
+Ensemble compatible spectral checkpoints from run directories under
+`checkpoints/`. The ensemble averages model probabilities and selects its
+prior-correction parameter using validation data:
 
 ```bash
 uv run -m src.models.e3nn.ensemble \
@@ -149,42 +105,37 @@ uv run -m src.models.e3nn.ensemble \
   '+runs=[run_directory_1,run_directory_2]'
 ```
 
-Use only checkpoints produced by the same configurable spectral model family.
+Use `+select=recall` to select by macro recall subject to the validation
+accuracy constraint.
 
-To reuse saved strict-protocol experiment outputs without retraining:
+## Export predictions
 
-```bash
-uv run -m src.experiments.spectral_experiments --report-only
-```
-
-The complete-input scalar protocol can also be ensembled. Run it with
-different seeds by changing `random_seed` in
-`configs/config_global_statistics_e3nn.yaml`; each run is saved under
-`results/raw_npz_scalars/`. Then report the saved ensemble with:
-
-```bash
-uv run -m src.experiments.spectral_experiments \
-  --report-only \
-  --output-dir results/raw_npz_scalars
-```
-
-## Export predictions for all HPO checkpoints
-
-After each checkpoint directory contains exactly one `final-epoch=*.ckpt`,
-export its per-sample predictions on the matching test set:
+For finalized HPO checkpoint directories containing a `final-epoch=*.ckpt`,
+export per-sample test predictions:
 
 ```bash
 uv run -m src.scripts.evaluate_checkpoints
 ```
 
-The script writes one CSV per checkpoint to
-`results/checkpoint_predictions/`, named after its checkpoint directory. Each
-CSV contains the sample identifier, true and predicted class, predicted-class
-probability, and the 1-based rank of the true class. Override the checkpoint,
-data, or output roots with `--checkpoints-dir`, `--data-root`, and
-`--output-dir`.
+The script writes one CSV per checkpoint to `checkpoint_predictions/`. Each
+CSV contains the sample identifier, true and predicted classes,
+predicted-class probability, and 1-based rank of the true class. Override the
+checkpoint, data, or output folders with `--checkpoints-dir`, `--data-root`,
+and `--output-dir`.
 
-## Visualize blobs
+## Prediction analysis
+
+Analyze all prediction CSVs and write a separate report folder for each:
+
+```bash
+uv run python prediction_analysis/analyze_checkpoint_predictions.py
+```
+
+Reports are saved under `prediction_analysis/results/` and summarize class
+performance, confusions, confidence, and true-class rank. Use repeated
+`--csv <filename>` options to select inputs.
+
+## Visualization
 
 ```bash
 uv run streamlit run src/visualizations/blob_visualization.py
